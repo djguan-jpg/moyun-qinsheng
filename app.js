@@ -32,6 +32,25 @@ document.querySelectorAll('.tabbar button,.filters button,.news-cats button').fo
   button.classList.add('active');
 }));
 
+const adminCurrentTime = document.querySelector('.admin-header > div:first-child > span');
+const adminTimeFormatter = new Intl.DateTimeFormat('zh-TW', {
+  timeZone: 'Asia/Taipei',
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+  weekday: 'long',
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hourCycle: 'h23',
+});
+function updateAdminCurrentTime() {
+  if (!adminCurrentTime) return;
+  adminCurrentTime.textContent = `台灣時間　${adminTimeFormatter.format(new Date())}`;
+}
+updateAdminCurrentTime();
+window.setInterval(updateAdminCurrentTime, 1000);
+
 const requestedView = window.location.hash.slice(1);
 if (requestedView && document.getElementById(requestedView)) showView(requestedView, false);
 window.addEventListener('hashchange', () => {
