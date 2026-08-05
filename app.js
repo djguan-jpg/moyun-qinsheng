@@ -83,7 +83,31 @@ document.querySelectorAll('.row-link').forEach((button) => button.addEventListen
 
 const adminAuthGate = document.querySelector('.admin-auth-gate');
 const adminLoginForm = document.querySelector('#admin-login-form');
+const adminLoginEmail = document.querySelector('#admin-login-email');
+const adminLoginPassword = document.querySelector('#admin-login-password');
+const adminEmailField = document.querySelector('#admin-email-field');
+const adminLoginKicker = document.querySelector('#admin-login-kicker');
+const adminLoginTitle = document.querySelector('#admin-login-title');
 const adminLoginMessage = document.querySelector('#admin-login-message');
+const localAdminSessionKey = 'moyun-local-admin-unlocked';
+const localAdminPasswordHash = 'fcdc9032c830ad467034edc5d10ae6c94f7f1065f0de250103ebfc66d5c0bf08';
+
+function configureAdminGate(useSupabase) {
+  adminEmailField.hidden = !useSupabase;
+  adminLoginEmail.disabled = !useSupabase;
+  adminLoginEmail.required = useSupabase;
+  adminLoginKicker.textContent = useSupabase ? 'ADMIN ACCESS' : 'ADMIN PASSWORD';
+  adminLoginTitle.textContent = useSupabase ? '管理員登入' : '輸入管理員密碼';
+  adminLoginPassword.placeholder = useSupabase ? '請輸入密碼' : '請輸入管理員密碼';
+  adminLoginMessage.textContent = '';
+}
+
+async function localPasswordMatches(password) {
+  const encodedPassword = new TextEncoder().encode(password);
+  const digest = await crypto.subtle.digest('SHA-256', encodedPassword);
+  const hashedPassword = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join('');
+  return hashedPassword === localAdminPasswordHash;
+}
 
 async function hydrateAdminDashboard() {
   if (!window.moyunSupabase) return;
@@ -98,7 +122,13 @@ async function hydrateAdminDashboard() {
 }
 
 window.requestAdminAccess = async () => {
-  if (!window.moyunSupabase) return;
+  if (!window.moyunSupabase) {
+    configureAdminGate(false);
+    if (sessionStorage.getItem(localAdminSessionKey) === 'true') { adminAuthGate.hidden = true; return; }
+    adminAuthGate.hidden = false;
+    return;
+  }
+  configureAdminGate(true);
   const { data: { user } } = await window.moyunSupabase.auth.getUser();
   if (!user) { adminAuthGate.hidden = false; return; }
   const { data: profile } = await window.moyunSupabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
@@ -113,20 +143,29 @@ window.requestAdminAccess = async () => {
 
 if (adminLoginForm) adminLoginForm.addEventListener('submit', async (event) => {
   event.preventDefault();
-  if (!window.moyunSupabase) return;
+  if (!window.moyunSupabase) {
+    const passwordMatches = await localPasswordMatches(adminLoginPassword.value);
+    if (!passwordMatches) { adminLoginMessage.textContent = '密碼不正確，請再試一次。'; return; }
+    sessionStorage.setItem(localAdminSessionKey, 'true');
+    adminLoginPassword.value = '';
+    adminAuthGate.hidden = true;
+    showAdminToast('已進入管理後台。');
+    return;
+  }
   adminLoginMessage.textContent = '正在登入…';
   const { error } = await window.moyunSupabase.auth.signInWithPassword({
-    email: document.querySelector('#admin-login-email').value,
-    password: document.querySelector('#admin-login-password').value,
+    email: adminLoginEmail.value,
+    password: adminLoginPassword.value,
   });
   if (error) { adminLoginMessage.textContent = error.message; return; }
   await window.requestAdminAccess();
 });
 
 document.querySelector('[data-admin-signout]')?.addEventListener('click', async () => {
-  if (!window.moyunSupabase) return;
-  await window.moyunSupabase.auth.signOut();
-  adminAuthGate.hidden = false;
+  if (window.moyunSupabase) await window.moyunSupabase.auth.signOut();
+  sessionStorage.removeItem(localAdminSessionKey);
+  adminAuthGate.hidden = true;
+  showView('home');
   showAdminToast('已登出管理後台');
 });
 
