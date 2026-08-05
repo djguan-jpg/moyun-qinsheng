@@ -7,6 +7,7 @@ function showView(viewId, updateHash = true) {
   document.querySelector('.main-nav').classList.remove('open');
   document.body.classList.toggle('admin-mode', viewId === 'admin');
   if (updateHash && window.location.hash !== `#${viewId}`) window.history.replaceState(null, '', `#${viewId}`);
+  if (viewId === 'admin') window.requestAdminAccess?.();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 viewButtons.forEach((button) => button.addEventListener('click', (event) => {
@@ -79,3 +80,54 @@ document.querySelectorAll('.row-link').forEach((button) => button.addEventListen
   button.textContent = '已處理 ✓';
   showAdminToast('報名資料狀態已更新');
 }));
+
+const adminAuthGate = document.querySelector('.admin-auth-gate');
+const adminLoginForm = document.querySelector('#admin-login-form');
+const adminLoginMessage = document.querySelector('#admin-login-message');
+
+async function hydrateAdminDashboard() {
+  if (!window.moyunSupabase) return;
+  const [{ count: total }, { count: paid }, { count: reviewing }, { count: votes }] = await Promise.all([
+    window.moyunSupabase.from('registrations').select('*', { count: 'exact', head: true }),
+    window.moyunSupabase.from('registrations').select('*', { count: 'exact', head: true }).eq('payment_status', 'paid'),
+    window.moyunSupabase.from('registrations').select('*', { count: 'exact', head: true }).eq('review_status', 'pending'),
+    window.moyunSupabase.from('votes').select('*', { count: 'exact', head: true }),
+  ]);
+  const metrics = document.querySelectorAll('.metric-grid h2');
+  [total, paid, reviewing, votes].forEach((value, index) => { if (metrics[index]) metrics[index].textContent = (value || 0).toLocaleString('zh-TW'); });
+}
+
+window.requestAdminAccess = async () => {
+  if (!window.moyunSupabase) return;
+  const { data: { user } } = await window.moyunSupabase.auth.getUser();
+  if (!user) { adminAuthGate.hidden = false; return; }
+  const { data: profile } = await window.moyunSupabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
+  if (profile?.role !== 'admin') {
+    adminAuthGate.hidden = false;
+    adminLoginMessage.textContent = '此帳號沒有管理員權限。';
+    return;
+  }
+  adminAuthGate.hidden = true;
+  await hydrateAdminDashboard();
+};
+
+if (adminLoginForm) adminLoginForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  if (!window.moyunSupabase) return;
+  adminLoginMessage.textContent = '正在登入…';
+  const { error } = await window.moyunSupabase.auth.signInWithPassword({
+    email: document.querySelector('#admin-login-email').value,
+    password: document.querySelector('#admin-login-password').value,
+  });
+  if (error) { adminLoginMessage.textContent = error.message; return; }
+  await window.requestAdminAccess();
+});
+
+document.querySelector('[data-admin-signout]')?.addEventListener('click', async () => {
+  if (!window.moyunSupabase) return;
+  await window.moyunSupabase.auth.signOut();
+  adminAuthGate.hidden = false;
+  showAdminToast('已登出管理後台');
+});
+
+if (requestedView === 'admin') window.requestAdminAccess();
