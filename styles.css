@@ -13,3 +13,4 @@ body.admin-mode>.site-header,body.admin-mode>footer{display:none}body.admin-mode
 .hero>.hero-art-label{z-index:3;color:#fff;text-shadow:0 2px 12px #172a25aa}.hero-art-label{display:flex;flex-direction:column;align-items:center;gap:.65em;margin:0;writing-mode:horizontal-tb;line-height:1}
 .form-layout aside>b,.form-layout li,label,input,select,textarea,.check{font-family:var(--calligraphy-steady);font-weight:400}input,select,textarea{font-size:15px}input::placeholder,textarea::placeholder{color:#8a928d;opacity:1}
 .category-list .category-link{display:inline-flex;align-items:center;justify-self:end;gap:7px;color:var(--red);font:400 12px var(--calligraphy-steady);letter-spacing:.08em;white-space:nowrap}.category-list .category-link svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-linecap:round;stroke-linejoin:round;stroke-width:1.6}
+.menu-button{color:var(--green);-webkit-appearance:none;appearance:none}
