@@ -109,7 +109,7 @@ const adminLoginKicker = document.querySelector('#admin-login-kicker');
 const adminLoginTitle = document.querySelector('#admin-login-title');
 const adminLoginMessage = document.querySelector('#admin-login-message');
 const localAdminSessionKey = 'moyun-local-admin-unlocked';
-const localAdminPasswordHash = 'fcdc9032c830ad467034edc5d10ae6c94f7f1065f0de250103ebfc66d5c0bf08';
+const localAdminPasswordHash = '5994471abb01112afcc18159f6cc74b4f511b99806da59b3caf5a9c173cacfc5';
 
 function configureAdminGate(useSupabase) {
   adminEmailField.hidden = !useSupabase;
