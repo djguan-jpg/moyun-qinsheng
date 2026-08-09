@@ -334,14 +334,50 @@ function renderLiveDashboard(data) {
   renderLiveVotingStats(data);
 }
 
+function renderLiveDataPlaceholder() {
+  liveAdminSnapshot = null;
+  const metricCards = document.querySelectorAll('#dashboard .metric-grid article');
+  const labels = ['總報名數', '今日投稿數', '已上傳作品', '總投票數'];
+  metricCards.forEach((card, index) => {
+    const labelElement = card.querySelector('p');
+    const valueElement = card.querySelector('h2');
+    const detailElement = card.querySelector('small');
+    if (labelElement) labelElement.textContent = labels[index];
+    if (valueElement) valueElement.textContent = '—';
+    if (detailElement) detailElement.textContent = '尚未同步 Discord 資料';
+  });
+  const greeting = document.querySelector('#dashboard .admin-title h1');
+  const chartTitle = document.querySelector('#dashboard .chart-card h3');
+  const chartCopy = document.querySelector('#dashboard .chart-card .card-head p');
+  const categoryTitle = document.querySelector('#dashboard .category-card h3');
+  const categoryCopy = document.querySelector('#dashboard .category-card .card-head p');
+  const categoryList = document.querySelector('#dashboard .category-card ul');
+  if (greeting) greeting.textContent = '早安，管理員 ☼';
+  if (chartTitle) chartTitle.textContent = '等待資料連接';
+  if (chartCopy) chartCopy.textContent = '請使用 Discord 管理員帳號連接資料';
+  if (categoryTitle) categoryTitle.textContent = '投稿概況';
+  if (categoryCopy) categoryCopy.textContent = '尚未同步';
+  if (categoryList) categoryList.replaceChildren();
+  renderLiveRegistrationTables([]);
+  renderLiveWorks([]);
+  document.querySelectorAll('#votes-admin .vote-admin-stats article').forEach((card) => {
+    const valueElement = card.querySelector('h2');
+    const detailElement = card.querySelector('small');
+    if (valueElement) valueElement.textContent = '—';
+    if (detailElement) detailElement.textContent = '尚未同步 Discord 資料';
+  });
+}
+
 async function hydrateLiveAdminDashboard() {
   const token = sessionStorage.getItem(liveAdminTokenKey);
   updateLiveDataConnectButton();
   if (!liveDataApiBaseUrl) {
+    renderLiveDataPlaceholder();
     setLiveDataStatus('尚未設定 Discord 資料伺服器。', 'error');
     return false;
   }
   if (!token) {
+    renderLiveDataPlaceholder();
     setLiveDataStatus('尚未連接 Discord 資料，請點選右上角「連接資料」。', 'pending');
     return false;
   }
@@ -352,6 +388,7 @@ async function hydrateLiveAdminDashboard() {
     });
     if (!response.ok) {
       if (response.status === 401 || response.status === 403) sessionStorage.removeItem(liveAdminTokenKey);
+      renderLiveDataPlaceholder();
       updateLiveDataConnectButton();
       setLiveDataStatus('Discord 管理員授權已失效，請重新連接資料。', 'error');
       return false;
@@ -362,6 +399,7 @@ async function hydrateLiveAdminDashboard() {
     updateLiveDataConnectButton();
     return true;
   } catch (error) {
+    renderLiveDataPlaceholder();
     setLiveDataStatus('目前無法連接 Discord 資料伺服器，請稍後再試。', 'error');
     return false;
   }
