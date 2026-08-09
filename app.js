@@ -127,6 +127,21 @@ function requestLiveDataAuthorization() {
   window.location.assign(`${liveDataApiBaseUrl}/moyun/admin/connect`);
 }
 
+function startDiscordRegistration() {
+  if (!liveDataApiBaseUrl) {
+    showAdminToast('目前無法連接 Discord 報名服務，請稍後再試。');
+    return;
+  }
+  window.location.assign(`${liveDataApiBaseUrl}/register`);
+}
+
+document.querySelectorAll('[data-discord-register]').forEach((button) => {
+  button.addEventListener('click', (event) => {
+    event.preventDefault();
+    startDiscordRegistration();
+  });
+});
+
 function initializeLiveDataControls() {
   const actionArea = document.querySelector('.admin-header > div:last-child');
   if (!actionArea || !liveDataApiBaseUrl || document.querySelector('[data-live-data-connect]')) return;

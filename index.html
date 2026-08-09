@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>墨韻琴聲｜全國音樂大賽</title>
-  <link rel="stylesheet" href="styles.css?v=20260809-admin-data" />
+  <link rel="stylesheet" href="styles.css?v=20260809-discord-register" />
 </head>
 <body>
   <div class="ink-blot ink-one"></div><div class="ink-blot ink-two"></div>
@@ -14,7 +14,7 @@
     <nav class="main-nav">
       <a class="active" href="#home" data-view="home">首頁</a><a href="#info" data-view="info">比賽資訊</a><a href="#register" data-view="register">線上報名</a><a href="#works" data-view="works">作品展演</a><a href="#vote" data-view="vote">人氣投票</a><a href="#news" data-view="news">最新消息</a><button class="admin-nav-entry" data-view="admin">管理員入口</button>
     </nav>
-    <button class="header-action" data-view="user">我的報名 <span>↗</span></button><button class="admin-entry" data-view="admin">管理員入口</button>
+    <button class="header-action" type="button" data-discord-register>我的報名 <span>↗</span></button><button class="admin-entry" data-view="admin">管理員入口</button>
   </header>
 
   <main>
@@ -48,7 +48,7 @@
 
     <section id="info" class="view page"><div class="page-hero"><p class="eyebrow">COMPETITION GUIDE</p><h1>比賽資訊</h1><p>以清晰規則，為自由演奏留下空間。</p></div><div class="tabbar"><button class="active">活動宗旨</button><button>參賽資格</button><button>賽程與規則</button><button>評分方式</button><button>常見問題</button></div><section class="content-columns"><article><span class="number">01</span><h2>讓音樂回到<br>感動人心的本質</h2></article><article class="prose"><p>墨韻琴聲全國音樂大賽致力於提供年輕音樂家一個公平、專業並兼具溫度的舞台。我們鼓勵參賽者在扎實訓練之外，持續發掘音樂與自己的關係。</p><blockquote>「不是比較誰更完美，而是聽見每一個人如何說自己的音樂。」</blockquote><div class="rule-list"><div><b>參賽對象</b><span>國小至大專院校在學生及社會青年</span></div><div><b>競賽組別</b><span>鋼琴、弦樂、國樂、聲樂、室內樂</span></div><div><b>競賽形式</b><span>初賽影片審查，決賽現場演出</span></div></div></article></section></section>
 
-    <section id="register" class="view page"><div class="page-hero"><p class="eyebrow">ONLINE REGISTRATION</p><h1>線上報名</h1><p>填寫資料約需 8 分鐘，請先備妥身分與曲目資料。</p></div><section class="form-layout"><aside><b>報名步驟</b><ol><li class="active">基本資料</li><li>組別與曲目</li><li>上傳附件</li><li>繳費方式</li><li>確認送出</li></ol><div class="help-box">需要協助？<br><strong>02 2718 2525</strong><br>週一至五 09:00–18:00</div></aside><form class="registration-form"><div class="form-title"><span>Step 01</span><h2>基本資料</h2></div><div class="form-grid"><label>參賽者姓名<input placeholder="請輸入中文姓名" /></label><label>身分證字號<input placeholder="請輸入身分證字號" /></label><label>出生日期<input type="date" /></label><label>聯絡電話<input placeholder="09XX-XXX-XXX" /></label><label class="wide">電子信箱<input type="email" placeholder="name@example.com" /></label><label>就讀學校<input placeholder="請輸入學校名稱" /></label><label>指導老師<input placeholder="請輸入老師姓名" /></label></div><label class="check"><input type="checkbox" /> 我已閱讀並同意參賽辦法與個人資料使用說明。</label><button class="button primary" type="button">下一步：組別與曲目 <span>→</span></button></form></section></section>
+    <section id="register" class="view page"><div class="page-hero"><p class="eyebrow">ONLINE REGISTRATION</p><h1>線上報名</h1><p>使用 Discord 帳號登入後，即可安全開始投稿並查詢報名進度。</p></div><section class="discord-registration"><div class="discord-registration-copy"><p class="eyebrow">DISCORD VERIFIED ENTRY</p><h2>使用 Discord<br>登入報名</h2><p>以你的 Discord 帳號完成身分驗證，登入後系統會帶你前往正式投稿頁面。</p><button class="discord-register-button" type="button" data-discord-register><span class="discord-register-mark" aria-hidden="true">◎</span><span>使用 Discord 登入報名</span><b aria-hidden="true">↗</b></button><small>請先加入官方 Discord 伺服器；每個帳號限一筆投稿資料。</small></div><ol class="discord-register-steps"><li><b>01</b><div><strong>Discord 登入</strong><span>使用熟悉的 Discord 帳號完成驗證。</span></div></li><li><b>02</b><div><strong>確認身分</strong><span>系統會確認你已加入活動伺服器。</span></div></li><li><b>03</b><div><strong>開始投稿</strong><span>登入後即可填寫作品資料並上傳檔案。</span></div></li></ol></section></section>
 
     <section id="works" class="view page"><div class="page-hero compact"><p class="eyebrow">SELECTED PERFORMANCES</p><h1>作品展演</h1><p>聆聽新一代演奏者，以自己的語言說故事。</p></div><section class="filters"><button class="active">全部作品</button><button>鋼琴</button><button>弦樂</button><button>國樂</button><button>聲樂</button><button>室內樂</button><label>排序<select><option>最新發布</option><option>人氣最高</option></select></label></section><section class="work-grid"><article class="work-card featured"><div class="work-image piano"><span class="play">▶</span></div><div><p>鋼琴組 · 少年組</p><h3>夜的鋼琴曲 · 第五樂章</h3><span>林宥辰　|　臺北市立敦化國中</span></div></article><article class="work-card"><div class="work-image violin"><span class="play">▶</span></div><div><p>弦樂組 · 青年組</p><h3>柴可夫斯基小提琴協奏曲</h3><span>陳品妤　|　國立臺灣師範大學</span></div></article><article class="work-card"><div class="work-image pipa"><span class="play">▶</span></div><div><p>國樂組 · 青年組</p><h3>十面埋伏</h3><span>許子晴　|　國立臺灣藝術大學</span></div></article></section></section>
 
@@ -74,6 +74,6 @@
   <script src="supabase-config.js"></script>
   <script src="supabase-client.js"></script>
   <script src="backend-config.js?v=20260809-admin-data"></script>
-    <script src="app.js?v=20260809-admin-data-2"></script>
+    <script src="app.js?v=20260809-discord-register"></script>
 </body>
 </html>
