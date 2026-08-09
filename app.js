@@ -480,7 +480,7 @@ if (exportReportButton) exportReportButton.addEventListener('click', () => {
   const reportUrl = URL.createObjectURL(new Blob([report], { type: 'text/csv;charset=utf-8' }));
   const downloadLink = document.createElement('a');
   downloadLink.href = reportUrl;
-  downloadLink.download = '墨韻琴聲-賽事報表.csv';
+  downloadLink.download = '古韻新生-賽事報表.csv';
   downloadLink.click();
   URL.revokeObjectURL(reportUrl);
   showAdminToast('報表已下載');
