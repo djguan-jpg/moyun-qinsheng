@@ -30,11 +30,27 @@ document.querySelectorAll('[data-admin]').forEach((button) => button.addEventLis
 }));
 document.querySelector('.mobile-admin-menu').addEventListener('click', () => document.querySelector('.admin-sidebar').classList.toggle('open'));
 document.querySelectorAll('.vote-button').forEach((button) => button.addEventListener('click', () => { button.innerHTML = '✓ 已完成今日投票'; button.disabled = true; }));
-document.querySelectorAll('.tabbar button,.filters button,.news-cats button').forEach((button) => button.addEventListener('click', () => {
+document.querySelectorAll('.filters button,.news-cats button').forEach((button) => button.addEventListener('click', () => {
   const group = button.parentElement.querySelectorAll('button');
   group.forEach((item) => item.classList.remove('active'));
   button.classList.add('active');
 }));
+
+const infoTabButtons = document.querySelectorAll('[data-info-tab]');
+const infoTabPanels = document.querySelectorAll('[data-info-panel]');
+function showInfoTab(tabId) {
+  infoTabButtons.forEach((button) => {
+    const isActive = button.dataset.infoTab === tabId;
+    button.classList.toggle('active', isActive);
+    button.setAttribute('aria-selected', String(isActive));
+  });
+  infoTabPanels.forEach((panel) => {
+    const isActive = panel.dataset.infoPanel === tabId;
+    panel.classList.toggle('active', isActive);
+    panel.hidden = !isActive;
+  });
+}
+infoTabButtons.forEach((button) => button.addEventListener('click', () => showInfoTab(button.dataset.infoTab)));
 
 const adminCurrentTime = document.querySelector('.admin-header > div:first-child > span');
 const adminTimeFormatter = new Intl.DateTimeFormat('zh-TW', {
