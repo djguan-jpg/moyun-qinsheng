@@ -597,6 +597,8 @@ const spiritInteractions = {
   momo: {
     symbols: ['墨', '●', '✦', '丶'],
     messages: ['墨墨畫出了一段新旋律，靈感＋1。', '一筆落下，山水之間有了新的聲音。', '墨墨把你的心情寫進樂譜裡了。'],
+    videoMessage: '墨墨正在揮毫作曲。',
+    idleMessage: '墨墨收起毛筆，回到靜靜等候靈感的模樣。',
     notes: [261.63, 329.63, 392],
     wave: 'triangle',
     step: 0.1,
@@ -606,6 +608,8 @@ const spiritInteractions = {
   yeye: {
     symbols: ['♪', '♥', '汪', '♫'],
     messages: ['夜夜搖著尾巴唱起晚安曲，陪伴值＋1。', '汪！夜夜用笑容點亮今晚的旋律。', '夜夜把你的心情唱成一首溫暖的歌。'],
+    videoMessage: '夜夜正在為你唱一段暖暖的旋律。',
+    idleMessage: '夜夜搖搖尾巴，回到陪伴你的待機狀態。',
     notes: [392, 493.88, 587.33, 659.25],
     wave: 'sine',
     step: 0.12,
@@ -615,6 +619,8 @@ const spiritInteractions = {
   lulu: {
     symbols: ['咚', '●', '✦', '鼓'],
     messages: ['律律敲響節拍，活力值全滿！', '咚、咚、鏘！律律邀請你一起搖擺。', '節奏已啟動，下一個音符交給你。'],
+    videoMessage: '律律正在喚醒水墨裡的節拍。',
+    idleMessage: '律律收住節拍，回到蓄勢待發的待機狀態。',
     notes: [130.81, 196, 130.81, 261.63],
     wave: 'square',
     step: 0.11,
@@ -693,8 +699,55 @@ function triggerSpirit(spiritId) {
   spiritTimers.set(spiritId, window.setTimeout(() => card.classList.remove('is-playing', 'is-combo'), 1900));
 }
 
+function stopSpiritVideo(spiritId, hasFinished = false) {
+  const card = spiritCards.get(spiritId);
+  const interaction = spiritInteractions[spiritId];
+  const video = card?.querySelector('[data-spirit-video]');
+  if (!card || !video) return;
+  video.pause();
+  try { video.currentTime = 0; } catch (_) { /* The browser has not loaded metadata yet. */ }
+  card.classList.remove('is-video-playing');
+  card.removeAttribute('aria-busy');
+  if (hasFinished) {
+    const response = card.querySelector('.spirit-response');
+    if (response) response.textContent = interaction.idleMessage;
+  }
+}
+
+function playSpiritVideo(spiritId) {
+  const card = spiritCards.get(spiritId);
+  const interaction = spiritInteractions[spiritId];
+  const video = card?.querySelector('[data-spirit-video]');
+  if (!card || !interaction || !video) return;
+  spiritCards.forEach((_, otherSpiritId) => {
+    if (otherSpiritId !== spiritId) stopSpiritVideo(otherSpiritId);
+  });
+  video.pause();
+  try { video.currentTime = 0; } catch (_) { /* Metadata is still loading; play() will begin at the start. */ }
+  card.classList.add('is-video-playing');
+  card.setAttribute('aria-busy', 'true');
+  const response = card.querySelector('.spirit-response');
+  if (response) response.textContent = `${interaction.videoMessage} 影片結束後會回到待機。`;
+  const playPromise = video.play();
+  if (playPromise) {
+    playPromise.catch(() => {
+      stopSpiritVideo(spiritId);
+      if (response) response.textContent = '影片暫時無法播放，請再試一次。';
+    });
+  }
+}
+
 document.querySelectorAll('[data-spirit-action]').forEach((button) => {
-  button.addEventListener('click', () => triggerSpirit(button.dataset.spiritAction));
+  button.addEventListener('click', () => {
+    const spiritId = button.dataset.spiritAction;
+    triggerSpirit(spiritId);
+    playSpiritVideo(spiritId);
+  });
+});
+
+document.querySelectorAll('[data-spirit-video]').forEach((video) => {
+  video.addEventListener('ended', () => stopSpiritVideo(video.dataset.spiritVideo, true));
+  video.addEventListener('error', () => stopSpiritVideo(video.dataset.spiritVideo));
 });
 
 function resetSpiritGaze(card) {

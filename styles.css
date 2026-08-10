@@ -130,3 +130,14 @@ body,body :where(a,button,input,select,textarea,label,p,span,small,strong,b,em,l
 @keyframes spirit-combo-glow{0%,100%{box-shadow:inset 0 0 0 0 rgba(180,145,97,0)}35%{box-shadow:inset 0 0 0 5px rgba(180,145,97,.55),inset 0 0 45px rgba(255,238,190,.28)}}
 @media(max-width:620px){.spirit-card.is-combo{animation:spirit-card-combo-mobile .62s ease-out}@keyframes spirit-card-combo-mobile{0%,100%{transform:translateY(0) rotate(0)}20%{transform:translateY(-2px) rotate(-.4deg)}45%{transform:translateY(-2px) rotate(.4deg)}70%{transform:translateY(-1px) rotate(-.2deg)}}}
 @media(prefers-reduced-motion:reduce){.spirit-momo:not(.is-playing) .spirit-portrait img,.spirit-yeye:not(.is-playing) .spirit-portrait img,.spirit-lulu:not(.is-playing) .spirit-portrait img,.spirit-card.is-combo,.spirit-card.is-combo .spirit-portrait,.spirit-card.is-combo .spirit-combo,.spirit-card.is-playing .spirit-special:before,.spirit-card.is-playing .spirit-special:after,.spirit-card.is-playing .spirit-special i{animation:none!important}.spirit-portrait img{translate:0 0!important}}
+
+/* User-triggered pet films: keep the player inside the original ink-card frame. */
+.spirit-video{position:absolute;inset:0;z-index:1;display:block;width:100%;height:100%;object-fit:cover;opacity:0;visibility:hidden;filter:saturate(.7) contrast(1.04) sepia(.1);mix-blend-mode:multiply;pointer-events:none;transition:opacity .36s ease,visibility 0s linear .36s}
+.spirit-video-wash{position:absolute;inset:0;z-index:2;pointer-events:none;opacity:0;background:linear-gradient(135deg,rgba(248,245,235,.32),rgba(35,54,45,.08) 52%,rgba(248,245,235,.28)),radial-gradient(ellipse at center,transparent 42%,rgba(25,43,36,.2) 100%);mix-blend-mode:multiply;transition:opacity .36s ease}
+.spirit-card.is-video-playing .spirit-video{opacity:1;visibility:visible;transition:opacity .36s ease}
+.spirit-card.is-video-playing .spirit-video-wash{opacity:1}
+.spirit-card.is-video-playing .spirit-portrait>img{opacity:0;animation:none!important;translate:0 0}
+.spirit-card.is-video-playing .spirit-hint{background:rgba(28,45,39,.9);opacity:1;transform:none}
+.spirit-card.is-video-playing .spirit-hint{font-size:0}
+.spirit-card.is-video-playing .spirit-hint:after{content:'影片播放中';font-size:10px}
+@media(prefers-reduced-motion:reduce){.spirit-video,.spirit-video-wash{transition:none}}
