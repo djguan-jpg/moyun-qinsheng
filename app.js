@@ -590,3 +590,117 @@ document.querySelector('[data-admin-signout]')?.addEventListener('click', async 
 });
 
 if (requestedView === 'admin') window.requestAdminAccess();
+
+const spiritCards = new Map(Array.from(document.querySelectorAll('[data-spirit]')).map((card) => [card.dataset.spirit, card]));
+const spiritTimers = new Map();
+const spiritInteractions = {
+  momo: {
+    symbols: ['墨', '●', '✦', '丶'],
+    messages: ['墨墨畫出了一段新旋律，靈感＋1。', '一筆落下，山水之間有了新的聲音。', '墨墨把你的心情寫進樂譜裡了。'],
+    notes: [261.63, 329.63, 392],
+    wave: 'triangle',
+    step: 0.1,
+    duration: 0.54,
+    gain: 0.034,
+  },
+  xianxian: {
+    symbols: ['♪', '♫', '♬', '◇'],
+    messages: ['絃絃撥出和弦，讓兩顆心靠近了一點。', '琴弦輕響，溫柔的旋律正在流動。', '絃絃為你串起一段清澈的和聲。'],
+    notes: [392, 493.88, 587.33, 783.99],
+    wave: 'sine',
+    step: 0.12,
+    duration: 0.62,
+    gain: 0.028,
+  },
+  lulu: {
+    symbols: ['咚', '●', '✦', '鼓'],
+    messages: ['律律敲響節拍，活力值全滿！', '咚、咚、鏘！律律邀請你一起搖擺。', '節奏已啟動，下一個音符交給你。'],
+    notes: [130.81, 196, 130.81, 261.63],
+    wave: 'square',
+    step: 0.11,
+    duration: 0.22,
+    gain: 0.018,
+  },
+};
+let spiritAudioContext;
+
+function playSpiritSound(interaction) {
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return;
+  try {
+    spiritAudioContext ||= new AudioContextClass();
+    if (spiritAudioContext.state === 'suspended') spiritAudioContext.resume();
+    const baseTime = spiritAudioContext.currentTime + 0.015;
+    interaction.notes.forEach((frequency, index) => {
+      const oscillator = spiritAudioContext.createOscillator();
+      const volume = spiritAudioContext.createGain();
+      const startTime = baseTime + (index * interaction.step);
+      oscillator.type = interaction.wave;
+      oscillator.frequency.setValueAtTime(frequency, startTime);
+      volume.gain.setValueAtTime(0.0001, startTime);
+      volume.gain.exponentialRampToValueAtTime(interaction.gain, startTime + 0.025);
+      volume.gain.exponentialRampToValueAtTime(0.0001, startTime + interaction.duration);
+      oscillator.connect(volume);
+      volume.connect(spiritAudioContext.destination);
+      oscillator.start(startTime);
+      oscillator.stop(startTime + interaction.duration + 0.04);
+    });
+  } catch (error) {
+    console.debug('Spirit audio unavailable', error);
+  }
+}
+
+function releaseSpiritParticles(card, interaction) {
+  const effects = card.querySelector('.spirit-effects');
+  if (!effects) return;
+  effects.replaceChildren();
+  for (let index = 0; index < 10; index += 1) {
+    const particle = document.createElement('span');
+    const horizontalDirection = index % 2 === 0 ? -1 : 1;
+    const horizontalDistance = (34 + ((index * 17) % 72)) * horizontalDirection;
+    particle.className = 'spirit-particle';
+    particle.textContent = interaction.symbols[index % interaction.symbols.length];
+    particle.style.setProperty('--x', `${horizontalDistance}px`);
+    particle.style.setProperty('--y', `${-78 - ((index * 29) % 120)}px`);
+    particle.style.setProperty('--rotation', `${horizontalDirection * (18 + (index * 7))}deg`);
+    particle.style.setProperty('--delay', `${(index % 5) * 0.055}s`);
+    effects.append(particle);
+  }
+}
+
+function triggerSpirit(spiritId) {
+  const card = spiritCards.get(spiritId);
+  const interaction = spiritInteractions[spiritId];
+  if (!card || !interaction) return;
+  const previousTimer = spiritTimers.get(spiritId);
+  if (previousTimer) window.clearTimeout(previousTimer);
+  card.classList.remove('is-playing');
+  void card.offsetWidth;
+  card.classList.add('is-playing');
+  const interactionCount = Number(card.dataset.interactionCount || 0);
+  card.dataset.interactionCount = String(interactionCount + 1);
+  const response = card.querySelector('.spirit-response');
+  if (response) response.textContent = interaction.messages[interactionCount % interaction.messages.length];
+  releaseSpiritParticles(card, interaction);
+  playSpiritSound(interaction);
+  spiritTimers.set(spiritId, window.setTimeout(() => card.classList.remove('is-playing'), 1700));
+}
+
+document.querySelectorAll('[data-spirit-action]').forEach((button) => {
+  button.addEventListener('click', () => triggerSpirit(button.dataset.spiritAction));
+});
+
+const spiritEnsembleButton = document.querySelector('[data-spirit-ensemble]');
+if (spiritEnsembleButton) spiritEnsembleButton.addEventListener('click', () => {
+  if (spiritEnsembleButton.classList.contains('is-playing')) return;
+  const originalLabel = spiritEnsembleButton.innerHTML;
+  spiritEnsembleButton.classList.add('is-playing');
+  spiritEnsembleButton.innerHTML = '<span aria-hidden="true">♪</span> 三靈合奏中';
+  ['momo', 'xianxian', 'lulu'].forEach((spiritId, index) => {
+    window.setTimeout(() => triggerSpirit(spiritId), index * 430);
+  });
+  window.setTimeout(() => {
+    spiritEnsembleButton.classList.remove('is-playing');
+    spiritEnsembleButton.innerHTML = originalLabel;
+  }, 2350);
+});
