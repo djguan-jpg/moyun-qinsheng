@@ -4,6 +4,7 @@ const navLinks = document.querySelectorAll('.main-nav a');
 const liveDataConfig = window.MOYUN_BACKEND_CONFIG || {};
 const liveDataApiBaseUrl = String(liveDataConfig.apiBaseUrl || '').replace(/\/+$/, '');
 const liveAdminTokenKey = 'moyun-live-admin-token';
+const liveAdminPendingActionKey = 'moyun-live-admin-pending-action';
 let liveAdminSnapshot = null;
 function showView(viewId, updateHash = true) {
   views.forEach((view) => view.classList.toggle('active', view.id === viewId));
@@ -76,6 +77,11 @@ function getRequestedView() {
   const adminToken = new URLSearchParams(rawParameters).get('admin_token');
   if (viewId === 'admin' && adminToken) {
     sessionStorage.setItem(liveAdminTokenKey, adminToken);
+    if (sessionStorage.getItem(liveAdminPendingActionKey) === 'upload-work' && liveDataApiBaseUrl) {
+      sessionStorage.removeItem(liveAdminPendingActionKey);
+      window.location.replace(`${liveDataApiBaseUrl}/admin#proxy-registration`);
+      return 'admin';
+    }
     window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#admin`);
   }
   return viewId;
@@ -151,12 +157,31 @@ function startDiscordRegistration() {
   window.location.assign(`${liveDataApiBaseUrl}/register`);
 }
 
+function openLiveWorksManager() {
+  if (!liveDataApiBaseUrl) {
+    showAdminToast('目前無法連接作品上傳服務，請稍後再試。');
+    return;
+  }
+  if (!sessionStorage.getItem(liveAdminTokenKey)) {
+    sessionStorage.setItem(liveAdminPendingActionKey, 'upload-work');
+    showAdminToast('請先使用 Discord 管理員帳號驗證。');
+    requestLiveDataAuthorization();
+    return;
+  }
+  const adminUrl = liveAdminSnapshot?.adminUrl || `${liveDataApiBaseUrl}/admin`;
+  const uploadUrl = new URL(adminUrl);
+  uploadUrl.hash = 'proxy-registration';
+  window.location.assign(uploadUrl.toString());
+}
+
 document.querySelectorAll('[data-discord-register]').forEach((button) => {
   button.addEventListener('click', (event) => {
     event.preventDefault();
     startDiscordRegistration();
   });
 });
+
+document.querySelector('[data-admin-add-work]')?.addEventListener('click', openLiveWorksManager);
 
 function initializeLiveDataControls() {
   const actionArea = document.querySelector('.admin-header > div:last-child');
@@ -583,6 +608,7 @@ document.querySelector('[data-admin-signout]')?.addEventListener('click', async 
   if (window.moyunSupabase) await window.moyunSupabase.auth.signOut();
   sessionStorage.removeItem(localAdminSessionKey);
   sessionStorage.removeItem(liveAdminTokenKey);
+  sessionStorage.removeItem(liveAdminPendingActionKey);
   liveAdminSnapshot = null;
   adminAuthGate.hidden = true;
   showView('home');
