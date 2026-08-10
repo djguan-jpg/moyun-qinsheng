@@ -623,15 +623,17 @@ const spiritInteractions = {
   },
 };
 let spiritAudioContext;
+const spiritReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
 
-function playSpiritSound(interaction) {
+function playSpiritSound(interaction, isCombo = false) {
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
   if (!AudioContextClass) return;
   try {
     spiritAudioContext ||= new AudioContextClass();
     if (spiritAudioContext.state === 'suspended') spiritAudioContext.resume();
     const baseTime = spiritAudioContext.currentTime + 0.015;
-    interaction.notes.forEach((frequency, index) => {
+    const notes = isCombo ? [...interaction.notes, interaction.notes[0] * 2] : interaction.notes;
+    notes.forEach((frequency, index) => {
       const oscillator = spiritAudioContext.createOscillator();
       const volume = spiritAudioContext.createGain();
       const startTime = baseTime + (index * interaction.step);
@@ -650,11 +652,12 @@ function playSpiritSound(interaction) {
   }
 }
 
-function releaseSpiritParticles(card, interaction) {
+function releaseSpiritParticles(card, interaction, isCombo = false) {
   const effects = card.querySelector('.spirit-effects');
   if (!effects) return;
   effects.replaceChildren();
-  for (let index = 0; index < 10; index += 1) {
+  const particleCount = isCombo ? 18 : 10;
+  for (let index = 0; index < particleCount; index += 1) {
     const particle = document.createElement('span');
     const horizontalDirection = index % 2 === 0 ? -1 : 1;
     const horizontalDistance = (34 + ((index * 17) % 72)) * horizontalDirection;
@@ -674,20 +677,57 @@ function triggerSpirit(spiritId) {
   if (!card || !interaction) return;
   const previousTimer = spiritTimers.get(spiritId);
   if (previousTimer) window.clearTimeout(previousTimer);
-  card.classList.remove('is-playing');
+  const interactionCount = Number(card.dataset.interactionCount || 0);
+  const nextInteractionCount = interactionCount + 1;
+  const isCombo = nextInteractionCount % 3 === 0;
+  card.classList.remove('is-playing', 'is-combo');
   void card.offsetWidth;
   card.classList.add('is-playing');
-  const interactionCount = Number(card.dataset.interactionCount || 0);
-  card.dataset.interactionCount = String(interactionCount + 1);
+  if (isCombo) card.classList.add('is-combo');
+  card.dataset.interactionCount = String(nextInteractionCount);
+  card.dataset.reaction = String(((nextInteractionCount - 1) % 3) + 1);
   const response = card.querySelector('.spirit-response');
-  if (response) response.textContent = interaction.messages[interactionCount % interaction.messages.length];
-  releaseSpiritParticles(card, interaction);
-  playSpiritSound(interaction);
-  spiritTimers.set(spiritId, window.setTimeout(() => card.classList.remove('is-playing'), 1700));
+  if (response) response.textContent = `${interaction.messages[interactionCount % interaction.messages.length]}${isCombo ? ' 三次默契連擊成功！' : ''}`;
+  releaseSpiritParticles(card, interaction, isCombo);
+  playSpiritSound(interaction, isCombo);
+  spiritTimers.set(spiritId, window.setTimeout(() => card.classList.remove('is-playing', 'is-combo'), 1900));
 }
 
 document.querySelectorAll('[data-spirit-action]').forEach((button) => {
   button.addEventListener('click', () => triggerSpirit(button.dataset.spiritAction));
+});
+
+function resetSpiritGaze(card) {
+  card.classList.remove('is-following');
+  card.style.setProperty('--gaze-x', '0px');
+  card.style.setProperty('--gaze-y', '0px');
+}
+
+document.querySelectorAll('.spirit-portrait').forEach((portrait) => {
+  const card = portrait.closest('.spirit-card');
+  if (!card) return;
+  portrait.addEventListener('pointermove', (event) => {
+    if (event.pointerType === 'touch' || spiritReducedMotion.matches) return;
+    const bounds = portrait.getBoundingClientRect();
+    const horizontalRatio = ((event.clientX - bounds.left) / bounds.width) - 0.5;
+    const verticalRatio = ((event.clientY - bounds.top) / bounds.height) - 0.5;
+    card.classList.add('is-following');
+    card.style.setProperty('--gaze-x', `${horizontalRatio * 10}px`);
+    card.style.setProperty('--gaze-y', `${verticalRatio * 7}px`);
+  });
+  portrait.addEventListener('pointerdown', (event) => {
+    if (event.pointerType !== 'touch' || spiritReducedMotion.matches) return;
+    const bounds = portrait.getBoundingClientRect();
+    const horizontalRatio = ((event.clientX - bounds.left) / bounds.width) - 0.5;
+    const verticalRatio = ((event.clientY - bounds.top) / bounds.height) - 0.5;
+    card.classList.add('is-following');
+    card.style.setProperty('--gaze-x', `${horizontalRatio * 8}px`);
+    card.style.setProperty('--gaze-y', `${verticalRatio * 5}px`);
+    window.setTimeout(() => resetSpiritGaze(card), 520);
+  });
+  portrait.addEventListener('pointerleave', () => resetSpiritGaze(card));
+  portrait.addEventListener('pointercancel', () => resetSpiritGaze(card));
+  portrait.addEventListener('blur', () => resetSpiritGaze(card));
 });
 
 const spiritEnsembleButton = document.querySelector('[data-spirit-ensemble]');

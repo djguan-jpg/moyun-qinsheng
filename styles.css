@@ -82,3 +82,46 @@ body,body :where(a,button,input,select,textarea,label,p,span,small,strong,b,em,l
 @media(max-width:760px){.spirits-heading{grid-template-columns:1fr}.spirits-heading>p{max-width:none}.spirit-grid{grid-template-columns:1fr;gap:22px}.spirit-card{max-width:480px;width:100%;margin:0 auto}.spirit-copy>p:not(.spirit-trait):not(.spirit-response){min-height:0}.spirit-portrait{aspect-ratio:1.08/1}.spirit-xianxian .spirit-portrait img{top:-44%}}
 @media(max-width:620px){.spirits-section{padding-top:68px;padding-bottom:68px}.spirits-heading{margin-bottom:30px}.spirits-heading h2{font-size:50px}.spirits-heading>p{font-size:14px}.spirit-ensemble{width:100%}.spirit-copy{padding:21px}.spirit-hint{right:11px;bottom:11px}.spirit-card:hover{transform:none}}
 @media(prefers-reduced-motion:reduce){.spirit-card,.spirit-card:after,.spirit-portrait img,.spirit-action,.spirit-ensemble{transition:none!important}.spirit-card.is-playing .spirit-portrait img,.spirit-card.is-playing .spirit-portrait:after,.spirit-particle,.spirit-ensemble.is-playing span{animation:none!important}}
+.spirit-card{--gaze-x:0px;--gaze-y:0px}
+.spirit-portrait img{translate:var(--gaze-x) var(--gaze-y);transition:filter .3s,transform .3s,translate .18s ease-out;will-change:transform,translate}
+.spirit-card.is-following .spirit-portrait{box-shadow:inset 0 0 0 2px rgba(255,255,255,.48)}
+.spirit-momo:not(.is-playing) .spirit-portrait img{animation:momo-idle 5.2s ease-in-out infinite}
+.spirit-xianxian:not(.is-playing) .spirit-portrait img{animation:xianxian-idle 6.4s ease-in-out infinite}
+.spirit-lulu:not(.is-playing) .spirit-portrait img{animation:lulu-idle 3.4s ease-in-out infinite}
+.spirit-special{position:absolute;inset:0;z-index:2;overflow:hidden;pointer-events:none}
+.spirit-combo{position:absolute;left:50%;top:16px;z-index:5;padding:8px 13px;border:1px solid rgba(255,255,255,.62);background:rgba(156,60,50,.88);color:#fff;font:600 11px var(--sans)!important;letter-spacing:.16em;opacity:0;transform:translate(-50%,-18px) scale(.72);pointer-events:none;box-shadow:0 10px 28px rgba(62,38,30,.2)}
+.spirit-card.is-combo .spirit-combo{animation:spirit-combo-pop 1.55s cubic-bezier(.16,.78,.23,1) forwards}
+.spirit-card.is-combo{animation:spirit-card-combo .62s ease-out}
+.spirit-card.is-combo .spirit-portrait{animation:spirit-combo-glow 1.5s ease-out}
+.spirit-momo .spirit-special:before{content:'';position:absolute;left:17%;top:57%;width:70%;height:10px;border-radius:50%;background:linear-gradient(90deg,transparent 0%,rgba(25,48,40,.82) 25%,rgba(25,48,40,.3) 78%,transparent 100%);filter:blur(1px);opacity:0;transform:rotate(-17deg) scaleX(.08);transform-origin:left}
+.spirit-momo .spirit-special i{position:absolute;width:8px;height:8px;border-radius:50%;background:#203a32;opacity:0}
+.spirit-momo .spirit-special i:nth-child(1){left:28%;top:61%}.spirit-momo .spirit-special i:nth-child(2){left:45%;top:54%;width:5px;height:5px}.spirit-momo .spirit-special i:nth-child(3){left:67%;top:46%;width:11px;height:11px}.spirit-momo .spirit-special i:nth-child(4){left:79%;top:38%;width:4px;height:4px}
+.spirit-momo.is-playing .spirit-special:before{animation:momo-ink-stroke 1.22s cubic-bezier(.2,.72,.28,1) forwards}
+.spirit-momo.is-playing .spirit-special i{animation:momo-ink-drop 1.1s ease-out forwards}.spirit-momo.is-playing .spirit-special i:nth-child(2){animation-delay:.12s}.spirit-momo.is-playing .spirit-special i:nth-child(3){animation-delay:.22s}.spirit-momo.is-playing .spirit-special i:nth-child(4){animation-delay:.32s}
+.spirit-xianxian .spirit-special{left:10%;right:9%;top:auto;bottom:7%;height:27%;overflow:visible;transform:rotate(-3deg)}
+.spirit-xianxian .spirit-special i{position:absolute;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(180,145,97,.88) 18%,rgba(255,239,184,.95) 52%,rgba(180,145,97,.62) 84%,transparent);opacity:0;transform-origin:center}
+.spirit-xianxian .spirit-special i:nth-child(1){top:18%}.spirit-xianxian .spirit-special i:nth-child(2){top:38%}.spirit-xianxian .spirit-special i:nth-child(3){top:58%}.spirit-xianxian .spirit-special i:nth-child(4){top:78%}
+.spirit-xianxian.is-playing .spirit-special i{animation:xianxian-string-wave .74s ease-in-out 2}.spirit-xianxian.is-playing .spirit-special i:nth-child(2){animation-delay:.07s}.spirit-xianxian.is-playing .spirit-special i:nth-child(3){animation-delay:.14s}.spirit-xianxian.is-playing .spirit-special i:nth-child(4){animation-delay:.21s}
+.spirit-xianxian .spirit-special:after{content:'♪';position:absolute;right:6%;top:-42%;color:#b49161;font:400 34px var(--calligraphy)!important;opacity:0;text-shadow:0 2px 14px rgba(255,255,255,.9)}
+.spirit-xianxian.is-playing .spirit-special:after{animation:xianxian-note-rise 1.35s ease-out forwards}
+.spirit-lulu .spirit-special i{position:absolute;left:52%;top:55%;width:28%;aspect-ratio:1;border:2px solid rgba(156,60,50,.72);border-radius:50%;opacity:0;transform:translate(-50%,-50%) scale(.2)}
+.spirit-lulu .spirit-special i:nth-child(2){border-color:rgba(180,145,97,.74)}.spirit-lulu .spirit-special i:nth-child(3){border-color:rgba(41,71,63,.62)}.spirit-lulu .spirit-special i:nth-child(4){border-style:dashed}
+.spirit-lulu.is-playing .spirit-special i{animation:lulu-rhythm-wave 1.08s ease-out forwards}.spirit-lulu.is-playing .spirit-special i:nth-child(2){animation-delay:.16s}.spirit-lulu.is-playing .spirit-special i:nth-child(3){animation-delay:.32s}.spirit-lulu.is-playing .spirit-special i:nth-child(4){animation-delay:.48s}
+.spirit-lulu .spirit-special:before,.spirit-lulu .spirit-special:after{position:absolute;z-index:2;color:#fff;font:700 28px var(--calligraphy)!important;opacity:0;text-shadow:0 2px 13px rgba(29,48,43,.8)}
+.spirit-lulu .spirit-special:before{content:'咚';left:15%;top:31%}.spirit-lulu .spirit-special:after{content:'鏘';right:12%;top:21%}
+.spirit-lulu.is-playing .spirit-special:before{animation:lulu-beat-word 1s ease-out forwards}.spirit-lulu.is-playing .spirit-special:after{animation:lulu-beat-word 1s .2s ease-out forwards}
+.spirit-card.is-combo .spirit-special{filter:drop-shadow(0 0 12px rgba(180,145,97,.72))}
+@keyframes momo-idle{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-.8%) rotate(.18deg)}}
+@keyframes xianxian-idle{0%,100%{transform:scale(1) translateY(0)}50%{transform:scale(1.008) translateY(-.55%)}}
+@keyframes lulu-idle{0%,100%{transform:translateY(0)}45%{transform:translateY(-.75%)}55%{transform:translateY(-.75%)}}
+@keyframes momo-ink-stroke{0%{opacity:0;transform:rotate(-17deg) scaleX(.06)}18%{opacity:.82}68%{opacity:.72;transform:rotate(-17deg) scaleX(1)}100%{opacity:0;transform:rotate(-17deg) scaleX(1.12)}}
+@keyframes momo-ink-drop{0%{opacity:0;transform:scale(.1)}28%{opacity:.82;transform:scale(1)}100%{opacity:0;transform:translate(9px,-24px) scale(.55)}}
+@keyframes xianxian-string-wave{0%{opacity:0;transform:scaleX(.75) translateY(0)}25%{opacity:1;transform:scaleX(1.02) translateY(-3px)}55%{opacity:.9;transform:scaleX(.98) translateY(3px)}100%{opacity:0;transform:scaleX(1) translateY(0)}}
+@keyframes xianxian-note-rise{0%{opacity:0;transform:translate(0,18px) rotate(-8deg) scale(.6)}24%{opacity:1}100%{opacity:0;transform:translate(-20px,-78px) rotate(13deg) scale(1.18)}}
+@keyframes lulu-rhythm-wave{0%{opacity:.82;transform:translate(-50%,-50%) scale(.16)}100%{opacity:0;transform:translate(-50%,-50%) scale(2.45)}}
+@keyframes lulu-beat-word{0%{opacity:0;transform:translateY(8px) scale(.6)}32%{opacity:1;transform:translateY(0) scale(1.08)}100%{opacity:0;transform:translateY(-24px) scale(.88)}}
+@keyframes spirit-combo-pop{0%{opacity:0;transform:translate(-50%,-18px) scale(.72)}20%,72%{opacity:1;transform:translate(-50%,0) scale(1)}100%{opacity:0;transform:translate(-50%,-8px) scale(.92)}}
+@keyframes spirit-card-combo{0%,100%{transform:translateY(-7px) rotate(0)}20%{transform:translateY(-9px) rotate(-.5deg)}45%{transform:translateY(-9px) rotate(.5deg)}70%{transform:translateY(-8px) rotate(-.25deg)}}
+@keyframes spirit-combo-glow{0%,100%{box-shadow:inset 0 0 0 0 rgba(180,145,97,0)}35%{box-shadow:inset 0 0 0 5px rgba(180,145,97,.55),inset 0 0 45px rgba(255,238,190,.28)}}
+@media(max-width:620px){.spirit-card.is-combo{animation:spirit-card-combo-mobile .62s ease-out}@keyframes spirit-card-combo-mobile{0%,100%{transform:translateY(0) rotate(0)}20%{transform:translateY(-2px) rotate(-.4deg)}45%{transform:translateY(-2px) rotate(.4deg)}70%{transform:translateY(-1px) rotate(-.2deg)}}}
+@media(prefers-reduced-motion:reduce){.spirit-momo:not(.is-playing) .spirit-portrait img,.spirit-xianxian:not(.is-playing) .spirit-portrait img,.spirit-lulu:not(.is-playing) .spirit-portrait img,.spirit-card.is-combo,.spirit-card.is-combo .spirit-portrait,.spirit-card.is-combo .spirit-combo,.spirit-card.is-playing .spirit-special:before,.spirit-card.is-playing .spirit-special:after,.spirit-card.is-playing .spirit-special i{animation:none!important}.spirit-portrait img{translate:0 0!important}}
