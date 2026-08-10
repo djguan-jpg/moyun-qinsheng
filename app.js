@@ -603,10 +603,10 @@ const spiritInteractions = {
     duration: 0.54,
     gain: 0.034,
   },
-  xianxian: {
-    symbols: ['♪', '♫', '♬', '◇'],
-    messages: ['絃絃撥出和弦，讓兩顆心靠近了一點。', '琴弦輕響，溫柔的旋律正在流動。', '絃絃為你串起一段清澈的和聲。'],
-    notes: [392, 493.88, 587.33, 783.99],
+  yeye: {
+    symbols: ['♪', '♥', '汪', '♫'],
+    messages: ['夜夜搖著尾巴唱起晚安曲，陪伴值＋1。', '汪！夜夜用笑容點亮今晚的旋律。', '夜夜把你的心情唱成一首溫暖的歌。'],
+    notes: [392, 493.88, 587.33, 659.25],
     wave: 'sine',
     step: 0.12,
     duration: 0.62,
@@ -736,7 +736,7 @@ if (spiritEnsembleButton) spiritEnsembleButton.addEventListener('click', () => {
   const originalLabel = spiritEnsembleButton.innerHTML;
   spiritEnsembleButton.classList.add('is-playing');
   spiritEnsembleButton.innerHTML = '<span aria-hidden="true">♪</span> 三靈合奏中';
-  ['momo', 'xianxian', 'lulu'].forEach((spiritId, index) => {
+  ['momo', 'yeye', 'lulu'].forEach((spiritId, index) => {
     window.setTimeout(() => triggerSpirit(spiritId), index * 430);
   });
   window.setTimeout(() => {

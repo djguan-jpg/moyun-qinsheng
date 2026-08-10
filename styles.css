@@ -37,13 +37,13 @@ body,body :where(a,button,input,select,textarea,label,p,span,small,strong,b,em,l
 .spirit-card:hover{transform:translateY(-7px);box-shadow:0 25px 58px rgba(35,51,43,.14);border-color:rgba(41,71,63,.34)}
 .spirit-card:after{content:'';position:absolute;left:0;right:0;bottom:0;height:3px;background:var(--green);transform:scaleX(0);transform-origin:left;transition:transform .35s}
 .spirit-card:hover:after,.spirit-card.is-playing:after{transform:scaleX(1)}
-.spirit-xianxian:after{background:var(--gold)}
+.spirit-yeye:after{background:var(--gold)}
 .spirit-lulu:after{background:var(--red)}
 .spirit-portrait{position:relative;display:block;width:100%;aspect-ratio:1/1;overflow:hidden;padding:0;border:0;border-bottom:1px solid var(--line);background:#efede6;cursor:pointer;text-align:left;-webkit-appearance:none;appearance:none}
 .spirit-portrait:focus-visible,.spirit-action:focus-visible,.spirit-ensemble:focus-visible{outline:3px solid rgba(156,60,50,.38);outline-offset:3px}
 .spirit-portrait img{position:absolute;top:-30%;width:300%;max-width:none;height:auto;filter:saturate(.82) contrast(1.05);transition:filter .3s,transform .3s;user-select:none;pointer-events:none}
 .spirit-momo .spirit-portrait img{left:0}
-.spirit-xianxian .spirit-portrait img{left:-100%;top:-39%}
+.spirit-yeye .spirit-portrait img{left:-100%;top:-38%}
 .spirit-lulu .spirit-portrait img{left:-200%}
 .spirit-card:hover .spirit-portrait img{filter:saturate(.98) contrast(1.07)}
 .spirit-hint{position:absolute;right:14px;bottom:14px;padding:7px 10px;background:rgba(28,45,39,.82);color:#fff;font-size:10px;letter-spacing:.12em;backdrop-filter:blur(7px);transition:opacity .2s,transform .2s}
@@ -55,38 +55,38 @@ body,body :where(a,button,input,select,textarea,label,p,span,small,strong,b,em,l
 .spirit-copy>p:not(.spirit-trait):not(.spirit-response){min-height:76px;margin:0;color:#657069;font-size:13px;line-height:1.9}
 .spirit-action{display:flex;align-items:center;justify-content:space-between;width:100%;margin-top:18px;padding:12px 14px;border:1px solid var(--green);background:transparent;color:var(--green);font:600 12px var(--sans);letter-spacing:.08em;cursor:pointer;transition:background .25s,color .25s,transform .25s}
 .spirit-action:hover{background:var(--green);color:#fff;transform:translateY(-2px)}
-.spirit-xianxian .spirit-action{border-color:#9b7447;color:#8a6336}
-.spirit-xianxian .spirit-action:hover{background:#9b7447;color:#fff}
+.spirit-yeye .spirit-action{border-color:#9b7447;color:#8a6336}
+.spirit-yeye .spirit-action:hover{background:#9b7447;color:#fff}
 .spirit-lulu .spirit-action{border-color:var(--red);color:var(--red)}
 .spirit-lulu .spirit-action:hover{background:var(--red);color:#fff}
 .spirit-response{min-height:18px;margin:11px 0 0;color:#7c8580;font-size:10px;line-height:1.6;letter-spacing:.04em;transition:color .2s}
 .spirit-card.is-playing .spirit-response{color:var(--red)}
 .spirit-effects{position:absolute;inset:0;overflow:hidden;pointer-events:none}
 .spirit-particle{position:absolute;left:50%;top:58%;z-index:3;color:var(--green);font:700 20px var(--calligraphy)!important;text-shadow:0 2px 12px rgba(255,255,255,.8);opacity:0;animation:spirit-particle-float 1.45s cubic-bezier(.19,.76,.26,1) forwards;animation-delay:var(--delay)}
-.spirit-xianxian .spirit-particle{color:#a47b43}
+.spirit-yeye .spirit-particle{color:#a47b43}
 .spirit-lulu .spirit-particle{color:var(--red)}
 .spirit-card.is-playing .spirit-portrait:after{content:'';position:absolute;inset:18%;z-index:2;border:2px solid rgba(41,71,63,.25);border-radius:50%;animation:spirit-ring 1.25s ease-out forwards;pointer-events:none}
-.spirit-xianxian.is-playing .spirit-portrait:after{border-color:rgba(180,145,97,.42)}
+.spirit-yeye.is-playing .spirit-portrait:after{border-color:rgba(180,145,97,.42)}
 .spirit-lulu.is-playing .spirit-portrait:after{border-color:rgba(156,60,50,.48);animation:spirit-beat-ring .8s ease-out 2}
 .spirit-momo.is-playing .spirit-portrait img{animation:momo-brush 1.25s ease-in-out}
-.spirit-xianxian.is-playing .spirit-portrait img{animation:xianxian-chord 1.45s ease-in-out}
+.spirit-yeye.is-playing .spirit-portrait img{animation:yeye-sing 1.45s ease-in-out}
 .spirit-lulu.is-playing .spirit-portrait img{animation:lulu-beat .86s cubic-bezier(.2,.8,.3,1) 2}
 @keyframes spirit-particle-float{0%{opacity:0;transform:translate(-50%,-50%) scale(.4) rotate(0)}18%{opacity:1}100%{opacity:0;transform:translate(calc(-50% + var(--x)),calc(-50% + var(--y))) scale(1.25) rotate(var(--rotation))}}
 @keyframes spirit-ring{0%{opacity:.75;transform:scale(.45)}100%{opacity:0;transform:scale(1.45)}}
 @keyframes spirit-beat-ring{0%{opacity:.8;transform:scale(.5)}100%{opacity:0;transform:scale(1.7)}}
 @keyframes momo-brush{0%,100%{transform:translate(0) rotate(0)}28%{transform:translate(-1.6%,1%) rotate(-1.2deg)}55%{transform:translate(1.2%,-.8%) rotate(.8deg)}}
-@keyframes xianxian-chord{0%,100%{transform:scale(1) translateY(0)}35%{transform:scale(1.025) translateY(-1.5%)}68%{transform:scale(1.01) translateY(.8%)}}
+@keyframes yeye-sing{0%,100%{transform:scale(1) translateY(0) rotate(0)}22%{transform:scale(1.018) translateY(-1.2%) rotate(-.45deg)}48%{transform:scale(1.025) translateY(-.4%) rotate(.5deg)}72%{transform:scale(1.012) translateY(-1%) rotate(-.25deg)}}
 @keyframes lulu-beat{0%,100%{transform:translateY(0) scale(1)}35%{transform:translateY(-2.4%) scale(1.018)}60%{transform:translateY(1%) scale(.995)}}
 @keyframes spirit-note-spin{to{transform:rotate(360deg)}}
 @media(max-width:1000px){.spirits-heading{grid-template-columns:1fr 1fr;gap:24px}.spirit-ensemble{justify-self:start}.spirit-grid{gap:15px}.spirit-copy{padding:20px}.spirit-copy h3{font-size:38px}.spirit-copy>p:not(.spirit-trait):not(.spirit-response){min-height:98px}}
-@media(max-width:760px){.spirits-heading{grid-template-columns:1fr}.spirits-heading>p{max-width:none}.spirit-grid{grid-template-columns:1fr;gap:22px}.spirit-card{max-width:480px;width:100%;margin:0 auto}.spirit-copy>p:not(.spirit-trait):not(.spirit-response){min-height:0}.spirit-portrait{aspect-ratio:1.08/1}.spirit-xianxian .spirit-portrait img{top:-44%}}
+@media(max-width:760px){.spirits-heading{grid-template-columns:1fr}.spirits-heading>p{max-width:none}.spirit-grid{grid-template-columns:1fr;gap:22px}.spirit-card{max-width:480px;width:100%;margin:0 auto}.spirit-copy>p:not(.spirit-trait):not(.spirit-response){min-height:0}.spirit-portrait{aspect-ratio:1.08/1}.spirit-yeye .spirit-portrait img{top:-42%}}
 @media(max-width:620px){.spirits-section{padding-top:68px;padding-bottom:68px}.spirits-heading{margin-bottom:30px}.spirits-heading h2{font-size:50px}.spirits-heading>p{font-size:14px}.spirit-ensemble{width:100%}.spirit-copy{padding:21px}.spirit-hint{right:11px;bottom:11px}.spirit-card:hover{transform:none}}
 @media(prefers-reduced-motion:reduce){.spirit-card,.spirit-card:after,.spirit-portrait img,.spirit-action,.spirit-ensemble{transition:none!important}.spirit-card.is-playing .spirit-portrait img,.spirit-card.is-playing .spirit-portrait:after,.spirit-particle,.spirit-ensemble.is-playing span{animation:none!important}}
 .spirit-card{--gaze-x:0px;--gaze-y:0px}
 .spirit-portrait img{translate:var(--gaze-x) var(--gaze-y);transition:filter .3s,transform .3s,translate .18s ease-out;will-change:transform,translate}
 .spirit-card.is-following .spirit-portrait{box-shadow:inset 0 0 0 2px rgba(255,255,255,.48)}
 .spirit-momo:not(.is-playing) .spirit-portrait img{animation:momo-idle 5.2s ease-in-out infinite}
-.spirit-xianxian:not(.is-playing) .spirit-portrait img{animation:xianxian-idle 6.4s ease-in-out infinite}
+.spirit-yeye:not(.is-playing) .spirit-portrait img{animation:yeye-idle 4.2s ease-in-out infinite}
 .spirit-lulu:not(.is-playing) .spirit-portrait img{animation:lulu-idle 3.4s ease-in-out infinite}
 .spirit-special{position:absolute;inset:0;z-index:2;overflow:hidden;pointer-events:none}
 .spirit-combo{position:absolute;left:50%;top:16px;z-index:5;padding:8px 13px;border:1px solid rgba(255,255,255,.62);background:rgba(156,60,50,.88);color:#fff;font:600 11px var(--sans)!important;letter-spacing:.16em;opacity:0;transform:translate(-50%,-18px) scale(.72);pointer-events:none;box-shadow:0 10px 28px rgba(62,38,30,.2)}
@@ -98,12 +98,14 @@ body,body :where(a,button,input,select,textarea,label,p,span,small,strong,b,em,l
 .spirit-momo .spirit-special i:nth-child(1){left:28%;top:61%}.spirit-momo .spirit-special i:nth-child(2){left:45%;top:54%;width:5px;height:5px}.spirit-momo .spirit-special i:nth-child(3){left:67%;top:46%;width:11px;height:11px}.spirit-momo .spirit-special i:nth-child(4){left:79%;top:38%;width:4px;height:4px}
 .spirit-momo.is-playing .spirit-special:before{animation:momo-ink-stroke 1.22s cubic-bezier(.2,.72,.28,1) forwards}
 .spirit-momo.is-playing .spirit-special i{animation:momo-ink-drop 1.1s ease-out forwards}.spirit-momo.is-playing .spirit-special i:nth-child(2){animation-delay:.12s}.spirit-momo.is-playing .spirit-special i:nth-child(3){animation-delay:.22s}.spirit-momo.is-playing .spirit-special i:nth-child(4){animation-delay:.32s}
-.spirit-xianxian .spirit-special{left:10%;right:9%;top:auto;bottom:7%;height:27%;overflow:visible;transform:rotate(-3deg)}
-.spirit-xianxian .spirit-special i{position:absolute;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(180,145,97,.88) 18%,rgba(255,239,184,.95) 52%,rgba(180,145,97,.62) 84%,transparent);opacity:0;transform-origin:center}
-.spirit-xianxian .spirit-special i:nth-child(1){top:18%}.spirit-xianxian .spirit-special i:nth-child(2){top:38%}.spirit-xianxian .spirit-special i:nth-child(3){top:58%}.spirit-xianxian .spirit-special i:nth-child(4){top:78%}
-.spirit-xianxian.is-playing .spirit-special i{animation:xianxian-string-wave .74s ease-in-out 2}.spirit-xianxian.is-playing .spirit-special i:nth-child(2){animation-delay:.07s}.spirit-xianxian.is-playing .spirit-special i:nth-child(3){animation-delay:.14s}.spirit-xianxian.is-playing .spirit-special i:nth-child(4){animation-delay:.21s}
-.spirit-xianxian .spirit-special:after{content:'♪';position:absolute;right:6%;top:-42%;color:#b49161;font:400 34px var(--calligraphy)!important;opacity:0;text-shadow:0 2px 14px rgba(255,255,255,.9)}
-.spirit-xianxian.is-playing .spirit-special:after{animation:xianxian-note-rise 1.35s ease-out forwards}
+.spirit-yeye .spirit-special{inset:0;overflow:hidden;transform:none}
+.spirit-yeye .spirit-special i{position:absolute;z-index:2;width:24px;height:24px;color:#a77848;font-style:normal;opacity:0;text-align:center;text-shadow:0 2px 14px rgba(255,255,255,.95)}
+.spirit-yeye .spirit-special i:before{content:'♥';font:400 23px/1 var(--calligraphy)!important}.spirit-yeye .spirit-special i:nth-child(2):before{content:'♪'}.spirit-yeye .spirit-special i:nth-child(4):before{content:'♫'}
+.spirit-yeye .spirit-special i:nth-child(1){left:17%;top:55%}.spirit-yeye .spirit-special i:nth-child(2){left:31%;top:36%}.spirit-yeye .spirit-special i:nth-child(3){right:25%;top:38%}.spirit-yeye .spirit-special i:nth-child(4){right:13%;top:57%}
+.spirit-yeye.is-playing .spirit-special i{animation:yeye-heart-float 1.35s ease-out forwards}.spirit-yeye.is-playing .spirit-special i:nth-child(2){animation-delay:.1s}.spirit-yeye.is-playing .spirit-special i:nth-child(3){animation-delay:.2s}.spirit-yeye.is-playing .spirit-special i:nth-child(4){animation-delay:.3s}
+.spirit-yeye .spirit-special:before,.spirit-yeye .spirit-special:after{position:absolute;z-index:3;color:#9b7447;font-family:var(--calligraphy)!important;opacity:0;text-shadow:0 2px 14px rgba(255,255,255,.95)}
+.spirit-yeye .spirit-special:before{content:'汪♪';left:14%;top:24%;font-size:25px}.spirit-yeye .spirit-special:after{content:'♫';right:14%;top:20%;font-size:36px}
+.spirit-yeye.is-playing .spirit-special:before{animation:yeye-song-pop 1.2s ease-out forwards}.spirit-yeye.is-playing .spirit-special:after{animation:yeye-note-drift 1.4s .14s ease-out forwards}
 .spirit-lulu .spirit-special i{position:absolute;left:52%;top:55%;width:28%;aspect-ratio:1;border:2px solid rgba(156,60,50,.72);border-radius:50%;opacity:0;transform:translate(-50%,-50%) scale(.2)}
 .spirit-lulu .spirit-special i:nth-child(2){border-color:rgba(180,145,97,.74)}.spirit-lulu .spirit-special i:nth-child(3){border-color:rgba(41,71,63,.62)}.spirit-lulu .spirit-special i:nth-child(4){border-style:dashed}
 .spirit-lulu.is-playing .spirit-special i{animation:lulu-rhythm-wave 1.08s ease-out forwards}.spirit-lulu.is-playing .spirit-special i:nth-child(2){animation-delay:.16s}.spirit-lulu.is-playing .spirit-special i:nth-child(3){animation-delay:.32s}.spirit-lulu.is-playing .spirit-special i:nth-child(4){animation-delay:.48s}
@@ -112,16 +114,17 @@ body,body :where(a,button,input,select,textarea,label,p,span,small,strong,b,em,l
 .spirit-lulu.is-playing .spirit-special:before{animation:lulu-beat-word 1s ease-out forwards}.spirit-lulu.is-playing .spirit-special:after{animation:lulu-beat-word 1s .2s ease-out forwards}
 .spirit-card.is-combo .spirit-special{filter:drop-shadow(0 0 12px rgba(180,145,97,.72))}
 @keyframes momo-idle{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-.8%) rotate(.18deg)}}
-@keyframes xianxian-idle{0%,100%{transform:scale(1) translateY(0)}50%{transform:scale(1.008) translateY(-.55%)}}
+@keyframes yeye-idle{0%,100%{transform:scale(1) translateY(0) rotate(0)}38%{transform:scale(1.008) translateY(-.7%) rotate(-.15deg)}52%{transform:scale(1.01) translateY(-.9%) rotate(.18deg)}66%{transform:scale(1.006) translateY(-.45%) rotate(0)}}
 @keyframes lulu-idle{0%,100%{transform:translateY(0)}45%{transform:translateY(-.75%)}55%{transform:translateY(-.75%)}}
 @keyframes momo-ink-stroke{0%{opacity:0;transform:rotate(-17deg) scaleX(.06)}18%{opacity:.82}68%{opacity:.72;transform:rotate(-17deg) scaleX(1)}100%{opacity:0;transform:rotate(-17deg) scaleX(1.12)}}
 @keyframes momo-ink-drop{0%{opacity:0;transform:scale(.1)}28%{opacity:.82;transform:scale(1)}100%{opacity:0;transform:translate(9px,-24px) scale(.55)}}
-@keyframes xianxian-string-wave{0%{opacity:0;transform:scaleX(.75) translateY(0)}25%{opacity:1;transform:scaleX(1.02) translateY(-3px)}55%{opacity:.9;transform:scaleX(.98) translateY(3px)}100%{opacity:0;transform:scaleX(1) translateY(0)}}
-@keyframes xianxian-note-rise{0%{opacity:0;transform:translate(0,18px) rotate(-8deg) scale(.6)}24%{opacity:1}100%{opacity:0;transform:translate(-20px,-78px) rotate(13deg) scale(1.18)}}
+@keyframes yeye-heart-float{0%{opacity:0;transform:translateY(12px) scale(.45) rotate(-8deg)}24%{opacity:1;transform:translateY(0) scale(1.08) rotate(3deg)}100%{opacity:0;transform:translateY(-72px) scale(.82) rotate(16deg)}}
+@keyframes yeye-song-pop{0%{opacity:0;transform:translate(-8px,8px) scale(.55) rotate(-8deg)}28%{opacity:1;transform:translate(0,0) scale(1.08) rotate(2deg)}100%{opacity:0;transform:translate(-12px,-42px) scale(.9) rotate(-4deg)}}
+@keyframes yeye-note-drift{0%{opacity:0;transform:translate(0,12px) scale(.55) rotate(-6deg)}24%{opacity:1}100%{opacity:0;transform:translate(18px,-70px) scale(1.2) rotate(14deg)}}
 @keyframes lulu-rhythm-wave{0%{opacity:.82;transform:translate(-50%,-50%) scale(.16)}100%{opacity:0;transform:translate(-50%,-50%) scale(2.45)}}
 @keyframes lulu-beat-word{0%{opacity:0;transform:translateY(8px) scale(.6)}32%{opacity:1;transform:translateY(0) scale(1.08)}100%{opacity:0;transform:translateY(-24px) scale(.88)}}
 @keyframes spirit-combo-pop{0%{opacity:0;transform:translate(-50%,-18px) scale(.72)}20%,72%{opacity:1;transform:translate(-50%,0) scale(1)}100%{opacity:0;transform:translate(-50%,-8px) scale(.92)}}
 @keyframes spirit-card-combo{0%,100%{transform:translateY(-7px) rotate(0)}20%{transform:translateY(-9px) rotate(-.5deg)}45%{transform:translateY(-9px) rotate(.5deg)}70%{transform:translateY(-8px) rotate(-.25deg)}}
 @keyframes spirit-combo-glow{0%,100%{box-shadow:inset 0 0 0 0 rgba(180,145,97,0)}35%{box-shadow:inset 0 0 0 5px rgba(180,145,97,.55),inset 0 0 45px rgba(255,238,190,.28)}}
 @media(max-width:620px){.spirit-card.is-combo{animation:spirit-card-combo-mobile .62s ease-out}@keyframes spirit-card-combo-mobile{0%,100%{transform:translateY(0) rotate(0)}20%{transform:translateY(-2px) rotate(-.4deg)}45%{transform:translateY(-2px) rotate(.4deg)}70%{transform:translateY(-1px) rotate(-.2deg)}}}
-@media(prefers-reduced-motion:reduce){.spirit-momo:not(.is-playing) .spirit-portrait img,.spirit-xianxian:not(.is-playing) .spirit-portrait img,.spirit-lulu:not(.is-playing) .spirit-portrait img,.spirit-card.is-combo,.spirit-card.is-combo .spirit-portrait,.spirit-card.is-combo .spirit-combo,.spirit-card.is-playing .spirit-special:before,.spirit-card.is-playing .spirit-special:after,.spirit-card.is-playing .spirit-special i{animation:none!important}.spirit-portrait img{translate:0 0!important}}
+@media(prefers-reduced-motion:reduce){.spirit-momo:not(.is-playing) .spirit-portrait img,.spirit-yeye:not(.is-playing) .spirit-portrait img,.spirit-lulu:not(.is-playing) .spirit-portrait img,.spirit-card.is-combo,.spirit-card.is-combo .spirit-portrait,.spirit-card.is-combo .spirit-combo,.spirit-card.is-playing .spirit-special:before,.spirit-card.is-playing .spirit-special:after,.spirit-card.is-playing .spirit-special i{animation:none!important}.spirit-portrait img{translate:0 0!important}}
