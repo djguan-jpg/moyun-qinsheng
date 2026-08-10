@@ -46,12 +46,14 @@ body,body :where(a,button,input,select,textarea,label,p,span,small,strong,b,em,l
 .spirit-yeye .spirit-portrait img{left:-85%;top:-36%}
 .spirit-lulu .spirit-portrait img{left:-170%;top:-24%}
 .spirit-card:hover .spirit-portrait img{filter:saturate(.98) contrast(1.07)}
-.spirit-hint{position:absolute;right:14px;bottom:14px;padding:7px 10px;background:rgba(28,45,39,.82);color:#fff;font-size:10px;letter-spacing:.12em;backdrop-filter:blur(7px);transition:opacity .2s,transform .2s}
+.spirit-hint{position:absolute;right:14px;bottom:14px;z-index:4;padding:7px 10px;background:rgba(28,45,39,.82);color:#fff;font-size:10px;letter-spacing:.12em;backdrop-filter:blur(7px);transition:opacity .2s,transform .2s}
+.spirit-momo .spirit-portrait:before,.spirit-yeye .spirit-portrait:before{content:'';position:absolute;left:0;right:0;bottom:-1px;height:13%;z-index:1;background:linear-gradient(180deg,rgba(239,237,230,0),rgba(239,237,230,.82) 56%,#efede6 88%);pointer-events:none}
+.spirit-lulu .spirit-portrait:before{content:'';position:absolute;left:0;right:0;bottom:-1px;height:4%;z-index:1;background:linear-gradient(180deg,rgba(239,237,230,0),#efede6);pointer-events:none}
 .spirit-card.is-playing .spirit-hint{opacity:0;transform:translateY(5px)}
-.spirit-copy{padding:24px 24px 26px}
+.spirit-copy{padding:24px 24px 26px;overflow:visible}
 .spirit-index{display:block;margin-bottom:7px;color:var(--red);font:500 9px var(--mono)!important;letter-spacing:.16em}
-.spirit-copy h3{margin:0;font:400 43px/1.15 var(--calligraphy)!important;letter-spacing:.12em}
-.spirit-trait{margin:6px 0 13px!important;color:var(--gold)!important;font:600 12px var(--sans)!important;letter-spacing:.18em}
+.spirit-copy h3{margin:0;padding:.08em 0 .12em;overflow:visible;font:400 43px/1.35 var(--calligraphy)!important;letter-spacing:.12em}
+.spirit-trait{margin:3px 0 13px!important;color:var(--gold)!important;font:600 12px/1.7 var(--sans)!important;letter-spacing:.18em}
 .spirit-copy>p:not(.spirit-trait):not(.spirit-response){min-height:76px;margin:0;color:#657069;font-size:13px;line-height:1.9}
 .spirit-action{display:flex;align-items:center;justify-content:space-between;width:100%;margin-top:18px;padding:12px 14px;border:1px solid var(--green);background:transparent;color:var(--green);font:600 12px var(--sans);letter-spacing:.08em;cursor:pointer;transition:background .25s,color .25s,transform .25s}
 .spirit-action:hover{background:var(--green);color:#fff;transform:translateY(-2px)}
@@ -79,7 +81,7 @@ body,body :where(a,button,input,select,textarea,label,p,span,small,strong,b,em,l
 @keyframes lulu-beat{0%,100%{transform:translateY(0) scale(1)}35%{transform:translateY(-2.4%) scale(1.018)}60%{transform:translateY(1%) scale(.995)}}
 @keyframes spirit-note-spin{to{transform:rotate(360deg)}}
 @media(max-width:1000px){.spirits-heading{grid-template-columns:1fr 1fr;gap:24px}.spirit-ensemble{justify-self:start}.spirit-grid{gap:15px}.spirit-copy{padding:20px}.spirit-copy h3{font-size:38px}.spirit-copy>p:not(.spirit-trait):not(.spirit-response){min-height:98px}}
-@media(max-width:760px){.spirits-heading{grid-template-columns:1fr}.spirits-heading>p{max-width:none}.spirit-grid{grid-template-columns:1fr;gap:22px}.spirit-card{max-width:480px;width:100%;margin:0 auto}.spirit-copy>p:not(.spirit-trait):not(.spirit-response){min-height:0}.spirit-portrait{aspect-ratio:1.08/1}.spirit-momo .spirit-portrait img{top:-36%}.spirit-yeye .spirit-portrait img{top:-38%}.spirit-lulu .spirit-portrait img{top:-26%}}
+@media(max-width:760px){.spirits-heading{grid-template-columns:1fr}.spirits-heading>p{max-width:none}.spirit-grid{grid-template-columns:1fr;gap:22px}.spirit-card{max-width:480px;width:100%;margin:0 auto}.spirit-copy>p:not(.spirit-trait):not(.spirit-response){min-height:0}.spirit-portrait{aspect-ratio:1.08/1}.spirit-momo .spirit-portrait img{top:-36%}.spirit-yeye .spirit-portrait img{top:-38%}.spirit-lulu .spirit-portrait img{top:-26%}.spirit-momo .spirit-portrait:before,.spirit-yeye .spirit-portrait:before{height:8%}.spirit-lulu .spirit-portrait:before{height:3%}}
 @media(max-width:620px){.spirits-section{padding-top:68px;padding-bottom:68px}.spirits-heading{margin-bottom:30px}.spirits-heading h2{font-size:50px}.spirits-heading>p{font-size:14px}.spirit-ensemble{width:100%}.spirit-copy{padding:21px}.spirit-hint{right:11px;bottom:11px}.spirit-card:hover{transform:none}}
 @media(prefers-reduced-motion:reduce){.spirit-card,.spirit-card:after,.spirit-portrait img,.spirit-action,.spirit-ensemble{transition:none!important}.spirit-card.is-playing .spirit-portrait img,.spirit-card.is-playing .spirit-portrait:after,.spirit-particle,.spirit-ensemble.is-playing span{animation:none!important}}
 .spirit-card{--gaze-x:0px;--gaze-y:0px}
