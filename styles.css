@@ -63,6 +63,22 @@ body,body :where(a,button,input,select,textarea,label,p,span,small,strong,b,em,l
 .spirit-lulu .spirit-action:hover{background:var(--red);color:#fff}
 .spirit-response{min-height:18px;margin:11px 0 0;color:#7c8580;font-size:10px;line-height:1.6;letter-spacing:.04em;transition:color .2s}
 .spirit-card.is-playing .spirit-response{color:var(--red)}
+.spirit-prompt-card{margin-top:15px;padding:15px 15px 14px;border:1px solid rgba(41,71,63,.2);border-left:3px solid var(--green);background:linear-gradient(135deg,rgba(233,237,230,.92),rgba(247,244,236,.96));box-shadow:0 10px 24px rgba(35,51,43,.07)}
+.spirit-prompt-card[hidden]{display:none}
+.spirit-prompt-card>div{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:9px}
+.spirit-prompt-card>div>span{color:var(--green);font:700 10px var(--sans)!important;letter-spacing:.14em}
+.spirit-prompt-card p{margin:0;color:#34453f;font:400 13px/1.85 var(--serif)!important;letter-spacing:.035em}
+.spirit-prompt-card small{display:block;margin-top:9px;color:#89908c;font:400 9px/1.6 var(--sans)!important;letter-spacing:.04em}
+.spirit-prompt-copy{flex:0 0 auto;padding:5px 8px;border:1px solid rgba(41,71,63,.32);background:rgba(255,255,255,.48);color:var(--green);font:600 9px var(--sans)!important;letter-spacing:.06em;cursor:pointer;transition:background .2s,color .2s}
+.spirit-prompt-copy:hover{background:var(--green);color:#fff}
+.spirit-prompt-card.is-revealing{animation:spirit-prompt-reveal .48s cubic-bezier(.2,.72,.28,1)}
+.spirit-yeye .spirit-prompt-card{border-color:rgba(155,116,71,.24);border-left-color:#9b7447;background:linear-gradient(135deg,rgba(246,238,223,.96),rgba(250,247,239,.98))}
+.spirit-yeye .spirit-prompt-card>div>span,.spirit-yeye .spirit-prompt-copy{color:#8a6336}
+.spirit-yeye .spirit-prompt-copy:hover{background:#9b7447;color:#fff}
+.spirit-lulu .spirit-prompt-card{border-color:rgba(156,60,50,.22);border-left-color:var(--red);background:linear-gradient(135deg,rgba(244,232,227,.92),rgba(249,246,238,.98))}
+.spirit-lulu .spirit-prompt-card>div>span,.spirit-lulu .spirit-prompt-copy{color:var(--red)}
+.spirit-lulu .spirit-prompt-copy:hover{background:var(--red);color:#fff}
+@keyframes spirit-prompt-reveal{0%{opacity:0;transform:translateY(10px)}100%{opacity:1;transform:translateY(0)}}
 .spirit-effects{position:absolute;inset:0;overflow:hidden;pointer-events:none}
 .spirit-particle{position:absolute;left:50%;top:58%;z-index:3;color:var(--green);font:700 20px var(--calligraphy)!important;text-shadow:0 2px 12px rgba(255,255,255,.8);opacity:0;animation:spirit-particle-float 1.45s cubic-bezier(.19,.76,.26,1) forwards;animation-delay:var(--delay)}
 .spirit-yeye .spirit-particle{color:#a47b43}
@@ -82,8 +98,8 @@ body,body :where(a,button,input,select,textarea,label,p,span,small,strong,b,em,l
 @keyframes spirit-note-spin{to{transform:rotate(360deg)}}
 @media(max-width:1000px){.spirits-heading{grid-template-columns:1fr 1fr;gap:24px}.spirit-ensemble{justify-self:start}.spirit-grid{gap:15px}.spirit-copy{padding:20px}.spirit-copy h3{font-size:38px}.spirit-copy>p:not(.spirit-trait):not(.spirit-response){min-height:98px}}
 @media(max-width:760px){.spirits-heading{grid-template-columns:1fr}.spirits-heading>p{max-width:none}.spirit-grid{grid-template-columns:1fr;gap:22px}.spirit-card{max-width:480px;width:100%;margin:0 auto}.spirit-copy>p:not(.spirit-trait):not(.spirit-response){min-height:0}.spirit-portrait{aspect-ratio:1.08/1}.spirit-momo .spirit-portrait img{top:-36%}.spirit-yeye .spirit-portrait img{top:-38%}.spirit-lulu .spirit-portrait img{top:-26%}.spirit-momo .spirit-portrait:before,.spirit-yeye .spirit-portrait:before{height:8%}.spirit-lulu .spirit-portrait:before{height:3%}}
-@media(max-width:620px){.spirits-section{padding-top:68px;padding-bottom:68px}.spirits-heading{margin-bottom:30px}.spirits-heading h2{font-size:50px}.spirits-heading>p{font-size:14px}.spirit-ensemble{width:100%}.spirit-copy{padding:21px}.spirit-hint{right:11px;bottom:11px}.spirit-card:hover{transform:none}}
-@media(prefers-reduced-motion:reduce){.spirit-card,.spirit-card:after,.spirit-portrait img,.spirit-action,.spirit-ensemble{transition:none!important}.spirit-card.is-playing .spirit-portrait img,.spirit-card.is-playing .spirit-portrait:after,.spirit-particle,.spirit-ensemble.is-playing span{animation:none!important}}
+@media(max-width:620px){.spirits-section{padding-top:68px;padding-bottom:68px}.spirits-heading{margin-bottom:30px}.spirits-heading h2{font-size:50px}.spirits-heading>p{font-size:14px}.spirit-ensemble{width:100%}.spirit-copy{padding:21px}.spirit-hint{right:11px;bottom:11px}.spirit-card:hover{transform:none}.spirit-prompt-card{padding:14px}.spirit-prompt-card p{font-size:12px;line-height:1.9}.spirit-prompt-card>div{align-items:flex-start}}
+@media(prefers-reduced-motion:reduce){.spirit-card,.spirit-card:after,.spirit-portrait img,.spirit-action,.spirit-ensemble{transition:none!important}.spirit-card.is-playing .spirit-portrait img,.spirit-card.is-playing .spirit-portrait:after,.spirit-particle,.spirit-ensemble.is-playing span,.spirit-prompt-card.is-revealing{animation:none!important}}
 .spirit-card{--gaze-x:0px;--gaze-y:0px}
 .spirit-portrait img{translate:var(--gaze-x) var(--gaze-y);transition:filter .3s,transform .3s,translate .18s ease-out;will-change:transform,translate}
 .spirit-card.is-following .spirit-portrait{box-shadow:inset 0 0 0 2px rgba(255,255,255,.48)}

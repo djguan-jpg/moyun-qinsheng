@@ -610,6 +610,13 @@ const spiritInteractions = {
   momo: {
     symbols: ['墨', '●', '✦', '丶'],
     messages: ['墨墨畫出了一段新旋律，靈感＋1。', '一筆落下，山水之間有了新的聲音。', '墨墨把你的心情寫進樂譜裡了。'],
+    prompts: [
+      '以「雨後古城裡未寄出的信」為主題，創作一首 72 BPM 的古風抒情歌曲。用古琴與鋼琴交織主旋律，加入簫和細微雨聲；主歌克制孤寂，副歌逐漸明亮，歌詞描寫等待、錯過與最終釋懷。',
+      '創作一首描寫「畫中人走出水墨山河」的古風歌曲。以五聲音階、琵琶輪指和低沉大鼓營造神祕感，女聲由呢喃轉為高亢，副歌要有一句容易記住的八字核心句。',
+      '把「月光落在無人彈奏的舊琴上」寫成一首電影感古風樂曲。前奏只用古琴泛音，主歌加入大提琴，副歌以弦樂群展開；情緒從寂靜、思念走向重逢，結尾保留一個未解的尾音。',
+      '以「墨色化成飛鳥，帶走心事」為意象，創作一首空靈的新中式歌曲。速度 80 BPM，使用鋼琴、笛子與環境氛圍音，歌詞避免直白告白，多用風、雲、紙、遠山等畫面表達放下。',
+      '創作一首關於「守護一座被遺忘的古老樂坊」的敘事歌曲。主歌像說故事，預副歌逐漸堆疊鼓點，副歌恢宏但不悲壯；使用琵琶、二胡、鋼琴與合唱，呈現傳承與新生。',
+    ],
     videoMessage: '墨墨正在揮毫作曲。',
     idleMessage: '墨墨收起毛筆，回到靜靜等候靈感的模樣。',
     notes: [261.63, 329.63, 392],
@@ -621,6 +628,13 @@ const spiritInteractions = {
   yeye: {
     symbols: ['♪', '♥', '汪', '♫'],
     messages: ['夜夜搖著尾巴唱起晚安曲，陪伴值＋1。', '汪！夜夜用笑容點亮今晚的旋律。', '夜夜把你的心情唱成一首溫暖的歌。'],
+    prompts: [
+      '以「深夜裡仍為你亮著的一盞燈」為主題，創作一首溫暖的流行古風歌曲。速度 86 BPM，以木吉他、人聲哼唱與古箏點綴；歌詞寫陪伴與安心，副歌像一句能讓人被接住的承諾。',
+      '創作一首適合夜晚戴耳機聽的療癒歌曲，描寫小狗陪主人走過低潮。以輕柔鋼琴、指彈吉他和細緻弦樂編曲，主歌親密自然，副歌溫暖開闊，避免過度悲傷。',
+      '把「一起在屋頂看星星」寫成一首清新的男女對唱。加入笛子與 Lo-fi 鼓點，速度 92 BPM；歌詞有生活感與輕微幽默，副歌設計簡單和聲，讓聽眾能跟著唱。',
+      '以「晚風替我把想念送到你身邊」為核心句，創作一首新中式流行情歌。使用古箏、電鋼琴與柔和鼓組，旋律甜而不膩，橋段短暫轉為孤單，最後回到充滿希望的副歌。',
+      '創作一首關於朋友久別重逢的暖心歌曲。前奏加入街道夜雨與遠處鈴聲，主歌採近距離人聲，副歌加入多人合唱；歌詞描寫即使走了很遠，仍能在熟悉旋律裡找到彼此。',
+    ],
     videoMessage: '夜夜正在為你唱一段暖暖的旋律。',
     idleMessage: '夜夜搖搖尾巴，回到陪伴你的待機狀態。',
     notes: [392, 493.88, 587.33, 659.25],
@@ -632,6 +646,13 @@ const spiritInteractions = {
   lulu: {
     symbols: ['咚', '●', '✦', '鼓'],
     messages: ['律律敲響節拍，活力值全滿！', '咚、咚、鏘！律律邀請你一起搖擺。', '節奏已啟動，下一個音符交給你。'],
+    prompts: [
+      '以「黑龍踏鼓喚醒沉睡山河」為主題，創作一首 128 BPM 的熱血古風電子歌曲。融合戰鼓、嗩吶、低頻合成器與切分節奏；主歌蓄勢，副歌爆發，加入可齊喊的四字口號。',
+      '創作一首適合競賽舞台開場的國風搖滾歌曲。以堂鼓和電吉他對奏，速度 140 BPM，間奏加入笛子高速旋律；歌詞描寫破局、前進與不服輸，副歌要有強烈記憶點。',
+      '把「每一次心跳都是出征的鼓聲」寫成一首戲劇感戰歌。使用三連音鼓組、低音弦樂與男聲合唱，從低語逐步推進到壯闊副歌，橋段突然安靜後再迎來最後一次爆發。',
+      '創作一首帶有東方奇幻感的節奏歌曲，描寫幼龍第一次學會控制雷電。融合打擊樂、笙、電子琶音與重低音，速度 118 BPM；整體調皮有活力，副歌加入節奏鮮明的擬聲詞。',
+      '以「逆風仍要擊鼓前行」為主題，創作一首鼓舞人心的新中式嘻哈歌曲。主歌採節奏口白，副歌改為有旋律的齊唱；加入大鼓、古箏切片和現代 Trap 鼓組，情緒堅定而明亮。',
+    ],
     videoMessage: '律律正在喚醒水墨裡的節拍。',
     idleMessage: '律律收住節拍，回到蓄勢待發的待機狀態。',
     notes: [130.81, 196, 130.81, 261.63],
@@ -643,6 +664,72 @@ const spiritInteractions = {
 };
 let spiritAudioContext;
 const spiritReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+function initializeSpiritPromptPanels() {
+  spiritCards.forEach((card, spiritId) => {
+    const copy = card.querySelector('.spirit-copy');
+    if (!copy || copy.querySelector('[data-spirit-prompt-panel]')) return;
+    const panel = document.createElement('section');
+    const header = document.createElement('div');
+    const label = document.createElement('span');
+    const copyButton = document.createElement('button');
+    const prompt = document.createElement('p');
+    const hint = document.createElement('small');
+    panel.className = 'spirit-prompt-card';
+    panel.dataset.spiritPromptPanel = spiritId;
+    panel.hidden = true;
+    label.textContent = '歌曲靈感提示詞';
+    copyButton.type = 'button';
+    copyButton.className = 'spirit-prompt-copy';
+    copyButton.textContent = '複製提示詞';
+    copyButton.dataset.spiritPromptCopy = spiritId;
+    prompt.dataset.spiritPromptText = spiritId;
+    hint.textContent = '再次點擊寵物，可更換一則新靈感。';
+    header.append(label, copyButton);
+    panel.append(header, prompt, hint);
+    copy.append(panel);
+  });
+}
+
+async function copySpiritPrompt(spiritId, button) {
+  const prompt = spiritCards.get(spiritId)?.querySelector('[data-spirit-prompt-text]')?.textContent;
+  if (!prompt) return;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(prompt);
+    } else {
+      const textarea = document.createElement('textarea');
+      textarea.value = prompt;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.append(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      textarea.remove();
+    }
+    button.textContent = '已複製 ✓';
+    window.setTimeout(() => { button.textContent = '複製提示詞'; }, 1600);
+  } catch (error) {
+    button.textContent = '請長按文字複製';
+    window.setTimeout(() => { button.textContent = '複製提示詞'; }, 2200);
+  }
+}
+
+function revealSpiritPrompt(card, interaction, promptIndex) {
+  const panel = card.querySelector('[data-spirit-prompt-panel]');
+  const prompt = card.querySelector('[data-spirit-prompt-text]');
+  if (!panel || !prompt || !interaction.prompts?.length) return;
+  prompt.textContent = interaction.prompts[promptIndex % interaction.prompts.length];
+  panel.hidden = false;
+  panel.classList.remove('is-revealing');
+  void panel.offsetWidth;
+  panel.classList.add('is-revealing');
+}
+
+initializeSpiritPromptPanels();
+document.querySelectorAll('[data-spirit-prompt-copy]').forEach((button) => {
+  button.addEventListener('click', () => copySpiritPrompt(button.dataset.spiritPromptCopy, button));
+});
 
 function playSpiritSound(interaction, isCombo = false) {
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -706,7 +793,8 @@ function triggerSpirit(spiritId) {
   card.dataset.interactionCount = String(nextInteractionCount);
   card.dataset.reaction = String(((nextInteractionCount - 1) % 3) + 1);
   const response = card.querySelector('.spirit-response');
-  if (response) response.textContent = `${interaction.messages[interactionCount % interaction.messages.length]}${isCombo ? ' 三次默契連擊成功！' : ''}`;
+  if (response) response.textContent = `${interaction.messages[interactionCount % interaction.messages.length]} 已生成歌曲靈感。${isCombo ? ' 三次默契連擊成功！' : ''}`;
+  revealSpiritPrompt(card, interaction, interactionCount);
   releaseSpiritParticles(card, interaction, isCombo);
   playSpiritSound(interaction, isCombo);
   spiritTimers.set(spiritId, window.setTimeout(() => card.classList.remove('is-playing', 'is-combo'), 1900));
