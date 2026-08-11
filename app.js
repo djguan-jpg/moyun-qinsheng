@@ -175,7 +175,7 @@ document.querySelectorAll('[data-discord-register]').forEach((button) => {
 });
 
 const publicCompetitionApiUrl = liveDataApiBaseUrl
-  ? `${liveDataApiBaseUrl}/api/public/competition`
+  ? `${liveDataApiBaseUrl}/api/public/competition?contest=guyun`
   : '';
 const publicWorksContainer = document.querySelector('[data-public-works]');
 const scheduleContainer = document.querySelector('[data-competition-schedule]');
@@ -385,6 +385,15 @@ async function hydratePublicCompetition() {
     });
     if (!response.ok) throw new Error(`Competition API returned ${response.status}`);
     const data = await response.json();
+    if (data.sourceAvailable === false) {
+      renderPublicWorks([]);
+      const officialVoteButton = document.querySelector('[data-open-official-vote]');
+      if (officialVoteButton) {
+        officialVoteButton.disabled = true;
+        officialVoteButton.textContent = '正式投票尚未開放';
+      }
+      return;
+    }
     renderPublicWorks(Array.isArray(data.works) ? data.works : []);
     applyCompetitionSchedule(data.schedule);
   } catch (error) {
