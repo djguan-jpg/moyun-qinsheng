@@ -3,15 +3,26 @@ const views = document.querySelectorAll('.view');
 const navLinks = document.querySelectorAll('.main-nav a');
 const liveDataConfig = window.MOYUN_BACKEND_CONFIG || {};
 const liveDataApiBaseUrl = String(liveDataConfig.apiBaseUrl || '').replace(/\/+$/, '');
-const liveAdminTokenKey = 'moyun-live-admin-token';
 let liveAdminSnapshot = null;
+
+function openDiscordAdmin() {
+  if (!liveDataApiBaseUrl) {
+    showAdminToast('目前無法連接 Discord 管理後台，請稍後再試。');
+    return;
+  }
+  window.location.assign(`${liveDataApiBaseUrl}/admin`);
+}
+
 function showView(viewId, updateHash = true) {
+  if (viewId === 'admin') {
+    openDiscordAdmin();
+    return;
+  }
   views.forEach((view) => view.classList.toggle('active', view.id === viewId));
   navLinks.forEach((link) => link.classList.toggle('active', link.dataset.view === viewId));
   document.querySelector('.main-nav').classList.remove('open');
-  document.body.classList.toggle('admin-mode', viewId === 'admin');
+  document.body.classList.remove('admin-mode');
   if (updateHash && window.location.hash !== `#${viewId}`) window.history.replaceState(null, '', `#${viewId}`);
-  if (viewId === 'admin') window.requestAdminAccess?.();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 viewButtons.forEach((button) => button.addEventListener('click', (event) => {
@@ -72,13 +83,7 @@ updateAdminCurrentTime();
 window.setInterval(updateAdminCurrentTime, 1000);
 
 function getRequestedView() {
-  const [viewId, rawParameters = ''] = window.location.hash.slice(1).split('?');
-  const adminToken = new URLSearchParams(rawParameters).get('admin_token');
-  if (viewId === 'admin' && adminToken) {
-    sessionStorage.setItem(liveAdminTokenKey, adminToken);
-    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#admin`);
-  }
-  return viewId;
+  return window.location.hash.slice(1).split('?')[0];
 }
 
 const requestedView = getRequestedView();
@@ -132,15 +137,11 @@ function setLiveDataStatus(message, state = 'pending') {
 function updateLiveDataConnectButton() {
   const button = document.querySelector('[data-live-data-connect]');
   if (!button) return;
-  button.textContent = sessionStorage.getItem(liveAdminTokenKey) ? '更新資料 ↻' : '連接資料';
+  button.textContent = 'Discord 管理後台 ↗';
 }
 
 function requestLiveDataAuthorization() {
-  if (!liveDataApiBaseUrl) {
-    showAdminToast('尚未設定資料伺服器。');
-    return;
-  }
-  window.location.assign(`${liveDataApiBaseUrl}/admin`);
+  openDiscordAdmin();
 }
 
 function startDiscordRegistration() {
@@ -178,13 +179,7 @@ function initializeLiveDataControls() {
   button.type = 'button';
   button.className = 'admin-connect-data';
   button.dataset.liveDataConnect = '';
-  button.addEventListener('click', () => {
-    if (sessionStorage.getItem(liveAdminTokenKey)) {
-      hydrateLiveAdminDashboard();
-      return;
-    }
-    requestLiveDataAuthorization();
-  });
+  button.addEventListener('click', requestLiveDataAuthorization);
   actionArea.prepend(button);
   updateLiveDataConnectButton();
 }
@@ -413,40 +408,8 @@ function renderLiveDataPlaceholder() {
 }
 
 async function hydrateLiveAdminDashboard() {
-  const token = sessionStorage.getItem(liveAdminTokenKey);
-  updateLiveDataConnectButton();
-  if (!liveDataApiBaseUrl) {
-    renderLiveDataPlaceholder();
-    setLiveDataStatus('尚未設定 Discord 資料伺服器。', 'error');
-    return false;
-  }
-  if (!token) {
-    renderLiveDataPlaceholder();
-    setLiveDataStatus('尚未連接 Discord 資料，請點選右上角「連接資料」。', 'pending');
-    return false;
-  }
-  setLiveDataStatus('正在同步 Discord 資料…', 'pending');
-  try {
-    const response = await fetch(`${liveDataApiBaseUrl}/api/moyun/admin/dashboard`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!response.ok) {
-      if (response.status === 401 || response.status === 403) sessionStorage.removeItem(liveAdminTokenKey);
-      renderLiveDataPlaceholder();
-      updateLiveDataConnectButton();
-      setLiveDataStatus('Discord 管理員授權已失效，請重新連接資料。', 'error');
-      return false;
-    }
-    const data = await response.json();
-    renderLiveDashboard(data);
-    setLiveDataStatus(`已連接 Discord 資料 · 更新於 ${formatLiveAdminDate(data.updatedAt)}`, 'connected');
-    updateLiveDataConnectButton();
-    return true;
-  } catch (error) {
-    renderLiveDataPlaceholder();
-    setLiveDataStatus('目前無法連接 Discord 資料伺服器，請稍後再試。', 'error');
-    return false;
-  }
+  openDiscordAdmin();
+  return false;
 }
 
 initializeLiveDataControls();
@@ -504,105 +467,7 @@ document.querySelectorAll('.row-link').forEach((button) => button.addEventListen
   showAdminToast('報名資料狀態已更新');
 }));
 
-const adminAuthGate = document.querySelector('.admin-auth-gate');
-const adminLoginForm = document.querySelector('#admin-login-form');
-const adminLoginEmail = document.querySelector('#admin-login-email');
-const adminLoginPassword = document.querySelector('#admin-login-password');
-const adminEmailField = document.querySelector('#admin-email-field');
-const adminLoginKicker = document.querySelector('#admin-login-kicker');
-const adminLoginTitle = document.querySelector('#admin-login-title');
-const adminLoginMessage = document.querySelector('#admin-login-message');
-const localAdminSessionKey = 'moyun-local-admin-unlocked';
-const localAdminPasswordHash = '5994471abb01112afcc18159f6cc74b4f511b99806da59b3caf5a9c173cacfc5';
-
-function configureAdminGate(useSupabase) {
-  adminEmailField.hidden = !useSupabase;
-  adminLoginEmail.disabled = !useSupabase;
-  adminLoginEmail.required = useSupabase;
-  adminLoginKicker.textContent = useSupabase ? 'ADMIN ACCESS' : 'ADMIN PASSWORD';
-  adminLoginTitle.textContent = useSupabase ? '管理員登入' : '輸入管理員密碼';
-  adminLoginPassword.placeholder = useSupabase ? '請輸入密碼' : '請輸入管理員密碼';
-  adminLoginMessage.textContent = '';
-}
-
-async function localPasswordMatches(password) {
-  const encodedPassword = new TextEncoder().encode(password);
-  const digest = await crypto.subtle.digest('SHA-256', encodedPassword);
-  const hashedPassword = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join('');
-  return hashedPassword === localAdminPasswordHash;
-}
-
-async function hydrateAdminDashboard() {
-  if (!window.moyunSupabase) {
-    await hydrateLiveAdminDashboard();
-    return;
-  }
-  const [{ count: total }, { count: paid }, { count: reviewing }, { count: votes }] = await Promise.all([
-    window.moyunSupabase.from('registrations').select('*', { count: 'exact', head: true }),
-    window.moyunSupabase.from('registrations').select('*', { count: 'exact', head: true }).eq('payment_status', 'paid'),
-    window.moyunSupabase.from('registrations').select('*', { count: 'exact', head: true }).eq('review_status', 'pending'),
-    window.moyunSupabase.from('votes').select('*', { count: 'exact', head: true }),
-  ]);
-  const metrics = document.querySelectorAll('.metric-grid h2');
-  [total, paid, reviewing, votes].forEach((value, index) => { if (metrics[index]) metrics[index].textContent = (value || 0).toLocaleString('zh-TW'); });
-}
-
-window.requestAdminAccess = async () => {
-  if (!window.moyunSupabase) {
-    configureAdminGate(false);
-    if (sessionStorage.getItem(localAdminSessionKey) === 'true') {
-      adminAuthGate.hidden = true;
-      await hydrateAdminDashboard();
-      return;
-    }
-    adminAuthGate.hidden = false;
-    return;
-  }
-  configureAdminGate(true);
-  const { data: { user } } = await window.moyunSupabase.auth.getUser();
-  if (!user) { adminAuthGate.hidden = false; return; }
-  const { data: profile } = await window.moyunSupabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
-  if (profile?.role !== 'admin') {
-    adminAuthGate.hidden = false;
-    adminLoginMessage.textContent = '此帳號沒有管理員權限。';
-    return;
-  }
-  adminAuthGate.hidden = true;
-  await hydrateAdminDashboard();
-};
-
-if (adminLoginForm) adminLoginForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  if (!window.moyunSupabase) {
-    const passwordMatches = await localPasswordMatches(adminLoginPassword.value);
-    if (!passwordMatches) { adminLoginMessage.textContent = '密碼不正確，請再試一次。'; return; }
-    sessionStorage.setItem(localAdminSessionKey, 'true');
-    adminLoginPassword.value = '';
-    adminAuthGate.hidden = true;
-    await hydrateAdminDashboard();
-    showAdminToast('已進入管理後台。');
-    return;
-  }
-  adminLoginMessage.textContent = '正在登入…';
-  const { error } = await window.moyunSupabase.auth.signInWithPassword({
-    email: adminLoginEmail.value,
-    password: adminLoginPassword.value,
-  });
-  if (error) { adminLoginMessage.textContent = error.message; return; }
-  await window.requestAdminAccess();
-});
-
-document.querySelector('[data-admin-signout]')?.addEventListener('click', async () => {
-  if (window.moyunSupabase) await window.moyunSupabase.auth.signOut();
-  sessionStorage.removeItem(localAdminSessionKey);
-  sessionStorage.removeItem(liveAdminTokenKey);
-  liveAdminSnapshot = null;
-  adminAuthGate.hidden = true;
-  showView('home');
-  showAdminToast('已登出管理後台');
-});
-
-if (requestedView === 'admin') window.requestAdminAccess();
+window.requestAdminAccess = openDiscordAdmin;
 
 const spiritCards = new Map(Array.from(document.querySelectorAll('[data-spirit]')).map((card) => [card.dataset.spirit, card]));
 const spiritTimers = new Map();
