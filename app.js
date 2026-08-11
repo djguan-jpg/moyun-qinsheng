@@ -86,11 +86,15 @@ function getRequestedView() {
   return window.location.hash.slice(1).split('?')[0];
 }
 
+function isKnownView(viewId) {
+  return Array.from(views).some((view) => view.id === viewId);
+}
+
 const requestedView = getRequestedView();
-if (requestedView && document.getElementById(requestedView)) showView(requestedView, false);
+if (requestedView && isKnownView(requestedView)) showView(requestedView, false);
 window.addEventListener('hashchange', () => {
   const viewId = getRequestedView();
-  if (viewId && document.getElementById(viewId)) showView(viewId, false);
+  if (viewId && isKnownView(viewId)) showView(viewId, false);
 });
 
 function showAdminToast(message) {
@@ -169,6 +173,265 @@ document.querySelectorAll('[data-discord-register]').forEach((button) => {
     startDiscordRegistration();
   });
 });
+
+const publicCompetitionApiUrl = liveDataApiBaseUrl
+  ? `${liveDataApiBaseUrl}/api/public/competition`
+  : '';
+const publicWorksContainer = document.querySelector('[data-public-works]');
+const scheduleContainer = document.querySelector('[data-competition-schedule]');
+let countdownTarget = scheduleContainer?.dataset.deadline
+  ? new Date(scheduleContainer.dataset.deadline)
+  : null;
+let countdownTimer;
+
+function formatAudioTime(value) {
+  if (!Number.isFinite(value) || value < 0) return '--:--';
+  const minutes = Math.floor(value / 60);
+  const seconds = Math.floor(value % 60);
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+function pauseOtherWorkPlayers(currentAudio) {
+  document.querySelectorAll('.work-audio').forEach((audio) => {
+    if (audio !== currentAudio && !audio.paused) audio.pause();
+  });
+}
+
+function createWaveform() {
+  const waveform = document.createElement('span');
+  waveform.className = 'work-waveform';
+  waveform.setAttribute('aria-hidden', 'true');
+  for (let index = 0; index < 32; index += 1) {
+    const bar = document.createElement('i');
+    const height = 11 + ((index * 19 + 17) % 28);
+    bar.style.setProperty('--height', `${height}px`);
+    bar.style.setProperty('--delay', `${(index % 8) * -0.075}s`);
+    waveform.append(bar);
+  }
+  return waveform;
+}
+
+function createPublicWorkCard(work, index) {
+  const card = document.createElement('article');
+  const artwork = document.createElement('div');
+  const artworkLabel = document.createElement('span');
+  const copy = document.createElement('div');
+  const category = document.createElement('p');
+  const title = document.createElement('h3');
+  const description = document.createElement('p');
+  const player = document.createElement('div');
+  const playButton = document.createElement('button');
+  const waveform = createWaveform();
+  const time = document.createElement('span');
+  const audio = document.createElement('audio');
+
+  card.className = `work-card public-work-card variant-${(index % 3) + 1}`;
+  artwork.className = 'work-image';
+  artworkLabel.className = 'play';
+  artworkLabel.textContent = String(index + 1).padStart(2, '0');
+  artwork.append(artworkLabel);
+  category.textContent = work.hasLyrics ? '古風音樂 · 含匿名歌詞' : '古風音樂 · 匿名展演';
+  title.textContent = work.code || `匿名作品 ${String(index + 1).padStart(2, '0')}`;
+  description.className = 'work-description';
+  description.textContent = '作品資料將於投票結束後由主辦單位統一公開。';
+  player.className = 'work-player';
+  playButton.type = 'button';
+  playButton.className = 'work-play-toggle';
+  playButton.textContent = '▶';
+  playButton.setAttribute('aria-label', `播放${title.textContent}`);
+  time.className = 'work-time';
+  time.textContent = '0:00 / --:--';
+  audio.className = 'work-audio';
+  audio.preload = 'none';
+  audio.src = work.listenUrl;
+  audio.setAttribute('controlsList', 'nodownload');
+
+  playButton.addEventListener('click', () => {
+    if (audio.paused) {
+      pauseOtherWorkPlayers(audio);
+      audio.play().catch(() => showAdminToast('音訊暫時無法播放，請稍後再試。'));
+    } else {
+      audio.pause();
+    }
+  });
+  audio.addEventListener('play', () => {
+    pauseOtherWorkPlayers(audio);
+    card.classList.add('is-playing');
+    playButton.textContent = 'Ⅱ';
+    playButton.setAttribute('aria-label', `暫停${title.textContent}`);
+  });
+  audio.addEventListener('pause', () => {
+    card.classList.remove('is-playing');
+    playButton.textContent = '▶';
+    playButton.setAttribute('aria-label', `播放${title.textContent}`);
+  });
+  audio.addEventListener('timeupdate', () => {
+    const progress = audio.duration ? (audio.currentTime / audio.duration) * 100 : 0;
+    waveform.style.setProperty('--progress', `${Math.min(100, progress)}%`);
+    time.textContent = `${formatAudioTime(audio.currentTime)} / ${formatAudioTime(audio.duration)}`;
+  });
+  audio.addEventListener('loadedmetadata', () => {
+    time.textContent = `0:00 / ${formatAudioTime(audio.duration)}`;
+  });
+  audio.addEventListener('ended', () => {
+    waveform.style.setProperty('--progress', '0%');
+    audio.currentTime = 0;
+  });
+
+  player.append(playButton, waveform, time, audio);
+  copy.append(category, title, description, player);
+  card.append(artwork, copy);
+  return card;
+}
+
+function renderPublicWorks(works) {
+  if (!publicWorksContainer) return;
+  if (!works.length) {
+    const empty = document.createElement('div');
+    const title = document.createElement('strong');
+    const copy = document.createElement('p');
+    const button = document.createElement('button');
+    empty.className = 'works-empty';
+    title.textContent = '第一首旋律，等待你投稿';
+    copy.textContent = '目前尚無公開作品，登入 Discord 即可完成投稿。';
+    button.type = 'button';
+    button.textContent = '使用 Discord 登入投稿 →';
+    button.addEventListener('click', startDiscordRegistration);
+    empty.append(title, copy, button);
+    publicWorksContainer.replaceChildren(empty);
+    return;
+  }
+  publicWorksContainer.replaceChildren(...works.map(createPublicWorkCard));
+}
+
+function setCountdownValue(selector, value) {
+  const element = scheduleContainer?.querySelector(selector);
+  if (element) element.textContent = String(Math.max(0, value)).padStart(2, '0');
+}
+
+function updateCountdown() {
+  if (!scheduleContainer || !countdownTarget || Number.isNaN(countdownTarget.valueOf())) return;
+  const remaining = Math.max(0, countdownTarget.getTime() - Date.now());
+  setCountdownValue('[data-countdown-days]', Math.floor(remaining / 86400000));
+  setCountdownValue('[data-countdown-hours]', Math.floor((remaining / 3600000) % 24));
+  setCountdownValue('[data-countdown-minutes]', Math.floor((remaining / 60000) % 60));
+  setCountdownValue('[data-countdown-seconds]', Math.floor((remaining / 1000) % 60));
+  if (remaining === 0 && countdownTimer) window.clearInterval(countdownTimer);
+}
+
+function updateScheduleStages(submission, voting) {
+  const submissionStage = scheduleContainer?.querySelector('[data-schedule-stage="submission"]');
+  const votingStage = scheduleContainer?.querySelector('[data-schedule-stage="voting"]');
+  [submissionStage, votingStage].forEach((stage) => stage?.classList.remove('active', 'complete'));
+  if (submission?.status === 'ended') submissionStage?.classList.add('complete');
+  else submissionStage?.classList.add('active');
+  if (submission?.status === 'ended' && voting?.status === 'open') votingStage?.classList.add('active');
+  else if (voting?.status === 'ended') votingStage?.classList.add('complete');
+}
+
+function applyCompetitionSchedule(schedule) {
+  if (!scheduleContainer || !schedule) return;
+  const submission = schedule.submission || {};
+  const voting = schedule.voting || {};
+  const badge = scheduleContainer.querySelector('[data-live-status]');
+  const period = scheduleContainer.querySelector('[data-live-period]');
+  const label = scheduleContainer.querySelector('[data-countdown-label]');
+  const fallbackDeadline = new Date(scheduleContainer.dataset.deadline);
+
+  if (submission.status === 'upcoming' && submission.startAt) {
+    countdownTarget = new Date(submission.startAt);
+    if (badge) badge.textContent = '投稿即將開始';
+    if (label) label.textContent = '投稿開始倒數';
+  } else if (submission.status !== 'ended') {
+    countdownTarget = submission.endAt ? new Date(submission.endAt) : fallbackDeadline;
+    if (badge) badge.textContent = 'Discord 投稿進行中';
+    if (label) label.textContent = '報名截止倒數';
+  } else if (voting.status === 'upcoming' && voting.startAt) {
+    countdownTarget = new Date(voting.startAt);
+    if (badge) badge.textContent = '投稿已截止';
+    if (label) label.textContent = '匿名投票開始倒數';
+  } else if (voting.status === 'open' && voting.endAt) {
+    countdownTarget = new Date(voting.endAt);
+    if (badge) badge.textContent = '匿名投票進行中';
+    if (label) label.textContent = '本階段投票截止倒數';
+  } else {
+    countdownTarget = null;
+    if (badge) {
+      badge.textContent = '本階段已結束';
+      badge.dataset.state = 'ended';
+    }
+    if (label) label.textContent = '下一階段時間將另行公告';
+    ['[data-countdown-days]', '[data-countdown-hours]', '[data-countdown-minutes]', '[data-countdown-seconds]']
+      .forEach((selector) => setCountdownValue(selector, 0));
+  }
+  if (period && submission.endAt) {
+    period.textContent = `報名期間：${submission.period}（台灣時間）`;
+  }
+  updateScheduleStages(submission, voting);
+  updateCountdown();
+}
+
+async function hydratePublicCompetition() {
+  updateCountdown();
+  countdownTimer = window.setInterval(updateCountdown, 1000);
+  if (!publicCompetitionApiUrl) {
+    renderPublicWorks([]);
+    return;
+  }
+  try {
+    const response = await fetch(publicCompetitionApiUrl, {
+      headers: { Accept: 'application/json' },
+      mode: 'cors',
+    });
+    if (!response.ok) throw new Error(`Competition API returned ${response.status}`);
+    const data = await response.json();
+    renderPublicWorks(Array.isArray(data.works) ? data.works : []);
+    applyCompetitionSchedule(data.schedule);
+  } catch (error) {
+    console.debug('Public competition data unavailable', error);
+    if (publicWorksContainer) {
+      const empty = document.createElement('div');
+      const title = document.createElement('strong');
+      const copy = document.createElement('p');
+      const button = document.createElement('button');
+      empty.className = 'works-empty';
+      title.textContent = '作品展間正在同步';
+      copy.textContent = '你仍可前往正式匿名展間聆聽作品。';
+      button.type = 'button';
+      button.textContent = '開啟正式作品展間 →';
+      button.addEventListener('click', () => window.location.assign(`${liveDataApiBaseUrl}/vote`));
+      empty.append(title, copy, button);
+      publicWorksContainer.replaceChildren(empty);
+    }
+  }
+}
+
+async function shareCompetition(kind) {
+  const registrationUrl = `${liveDataApiBaseUrl}/register`;
+  const messages = {
+    share: '古韻新生古風音樂大賽現正開放投稿，以匿名投票讓每一段旋律公平被聽見。',
+    invite: '邀請你參加「古韻新生」古風音樂大賽！只要擁有 Discord 音樂創作者身分即可投稿。',
+  };
+  const text = `${messages[kind]}\n${registrationUrl}`;
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: '古韻新生｜古風音樂大賽', text, url: registrationUrl });
+      return;
+    }
+    await navigator.clipboard.writeText(text);
+    window.open('https://discord.com/channels/@me', '_blank', 'noopener');
+    showAdminToast('邀請文字已複製，可直接貼到 Discord。');
+  } catch (error) {
+    if (error?.name !== 'AbortError') showAdminToast('分享未完成，請再試一次。');
+  }
+}
+
+document.querySelector('[data-share-discord]')?.addEventListener('click', () => shareCompetition('share'));
+document.querySelector('[data-invite-creator]')?.addEventListener('click', () => shareCompetition('invite'));
+document.querySelector('[data-open-official-vote]')?.addEventListener('click', () => {
+  if (liveDataApiBaseUrl) window.location.assign(`${liveDataApiBaseUrl}/vote`);
+});
+hydratePublicCompetition();
 
 document.querySelector('[data-admin-add-work]')?.addEventListener('click', openLiveWorksManager);
 
