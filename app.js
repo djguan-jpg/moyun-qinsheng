@@ -832,12 +832,17 @@ async function copySpiritPrompt(spiritId, button) {
 }
 
 function revealSpiritPrompt(card, interaction, promptIndex) {
-  window.dispatchEvent(new CustomEvent('mingyun:request', {
-    detail: {
-      spiritId: card.dataset.spirit,
-      interactionCount: promptIndex + 1,
-    },
-  }));
+  const detail = {
+    spiritId: card.dataset.spirit,
+    interactionCount: promptIndex + 1,
+  };
+  if (!window.MINGYUN_READY) {
+    window.MINGYUN_PENDING_REQUEST = detail;
+    const response = card.querySelector('.spirit-response');
+    if (response) response.textContent = '古風靈感庫載入中，稍候就會自動展開。';
+    return;
+  }
+  window.dispatchEvent(new CustomEvent('mingyun:request', { detail }));
 }
 
 initializeSpiritPromptPanels();
