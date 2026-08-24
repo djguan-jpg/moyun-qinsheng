@@ -26,6 +26,27 @@ def test_registration_waits_for_scheduled_start(tmp_path):
     assert "12:00" in message
 
 
+def test_registration_closes_at_scheduled_deadline(tmp_path):
+    settings = Settings(
+        client_id="",
+        client_secret="",
+        guild_id="",
+        participant_role_id="",
+        redirect_uri="",
+        session_secret="test-secret",
+        session_https_only=False,
+        database_path=tmp_path / "registrations.sqlite3",
+        registration_start_at=datetime(2026, 8, 25, 4, 0, tzinfo=UTC),
+        registration_end_at=datetime(2026, 9, 12, 15, 59, tzinfo=UTC),
+        public_base_path="",
+    )
+
+    is_open, message = registration_state(settings, datetime(2026, 9, 12, 15, 59, tzinfo=UTC))
+
+    assert not is_open
+    assert "09 月 12 日 23:59" in message
+
+
 def test_health_reports_unconfigured_discord_and_initialises_database(tmp_path):
     settings = Settings(
         client_id="",

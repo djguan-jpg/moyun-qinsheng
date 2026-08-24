@@ -318,6 +318,41 @@ function setCountdownValue(selector, value) {
   if (element) element.textContent = String(Math.max(0, value)).padStart(2, '0');
 }
 
+function applyStaticRegistrationSchedule() {
+  if (!scheduleContainer) return false;
+  const start = new Date(scheduleContainer.dataset.registrationStart);
+  const end = new Date(scheduleContainer.dataset.deadline);
+  if (Number.isNaN(start.valueOf()) || Number.isNaN(end.valueOf())) return false;
+
+  const badge = scheduleContainer.querySelector('[data-live-status]');
+  const title = scheduleContainer.querySelector('#competition-live-title');
+  const label = scheduleContainer.querySelector('[data-countdown-label]');
+  const now = Date.now();
+
+  if (now < start.getTime()) {
+    countdownTarget = start;
+    if (badge) badge.textContent = '投稿即將開始';
+    if (title) title.innerHTML = '距離報名開放<br><i>還有一段旋律</i>';
+    if (label) label.textContent = '投稿開始倒數';
+  } else if (now < end.getTime()) {
+    countdownTarget = end;
+    if (badge) badge.textContent = 'Discord 投稿進行中';
+    if (title) title.innerHTML = '距離報名截止<br><i>還有一段旋律</i>';
+    if (label) label.textContent = '報名截止倒數';
+  } else {
+    countdownTarget = null;
+    if (badge) {
+      badge.textContent = '本階段已結束';
+      badge.dataset.state = 'ended';
+    }
+    if (title) title.innerHTML = '本階段報名已結束<br><i>謝謝每一段旋律</i>';
+    if (label) label.textContent = '報名活動已結束';
+    ['[data-countdown-days]', '[data-countdown-hours]', '[data-countdown-minutes]', '[data-countdown-seconds]']
+      .forEach((selector) => setCountdownValue(selector, 0));
+  }
+  return true;
+}
+
 function updateCountdown() {
   if (!scheduleContainer || !countdownTarget || Number.isNaN(countdownTarget.valueOf())) return;
   const remaining = Math.max(0, countdownTarget.getTime() - Date.now());
@@ -325,6 +360,10 @@ function updateCountdown() {
   setCountdownValue('[data-countdown-hours]', Math.floor((remaining / 3600000) % 24));
   setCountdownValue('[data-countdown-minutes]', Math.floor((remaining / 60000) % 60));
   setCountdownValue('[data-countdown-seconds]', Math.floor((remaining / 1000) % 60));
+  if (remaining === 0 && !publicCompetitionApiUrl && applyStaticRegistrationSchedule() && countdownTarget) {
+    updateCountdown();
+    return;
+  }
   if (remaining === 0 && countdownTimer) window.clearInterval(countdownTimer);
 }
 
@@ -381,6 +420,7 @@ function applyCompetitionSchedule(schedule) {
 }
 
 async function hydratePublicCompetition() {
+  if (!publicCompetitionApiUrl) applyStaticRegistrationSchedule();
   updateCountdown();
   countdownTimer = window.setInterval(updateCountdown, 1000);
   if (!publicCompetitionApiUrl) {

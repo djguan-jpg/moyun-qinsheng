@@ -392,7 +392,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
   <label>作品簡介<textarea name="description" required maxlength="2000" placeholder="請介紹創作理念、樂器與曲風"></textarea></label>
   <label>作品音檔<input name="audio_file" required type="file" accept="audio/mpeg,audio/mp4,audio/wav,audio/ogg,audio/webm,.mp3,.m4a,.wav,.ogg,.webm"></label>
   <p class="muted">支援 MP3、M4A、WAV、OGG、WEBM，檔案大小上限 25 MB。完成送出後，音檔會立即顯示於公開作品展演頁供其他人播放。</p>
-  <label>聯絡信箱<input name="contact_email" required type="email" maxlength="254" placeholder="name@example.com"></label>
   <label><span><input name="agreement" value="yes" type="checkbox" required> 我確認資料正確，並同意活動規則。</span></label>
   <button type="submit">送出報名資料</button>
 </form>
@@ -415,12 +414,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         work_title = str(form.get("work_title", "")).strip()
         category = str(form.get("category", "")).strip()
         description = str(form.get("description", "")).strip()
-        contact_email = str(form.get("contact_email", "")).strip()
         agreement = str(form.get("agreement", ""))
         audio_upload = form.get("audio_file")
-        if not (work_title and category and description and contact_email and agreement == "yes" and isinstance(audio_upload, UploadFile)):
+        if not (work_title and category and description and agreement == "yes" and isinstance(audio_upload, UploadFile)):
             return RedirectResponse(public_path(settings, "/register") + "?error=請完整填寫所有必填欄位。", status_code=303)
-        if len(work_title) > 200 or len(description) > 2000 or len(contact_email) > 254:
+        if len(work_title) > 200 or len(description) > 2000:
             return RedirectResponse(public_path(settings, "/register") + "?error=欄位內容超過允許長度。", status_code=303)
         try:
             audio_filename, audio_content_type, audio_size = await save_audio_upload(audio_upload, settings)
@@ -441,7 +439,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         work_title,
                         category,
                         description,
-                        contact_email,
+                        "",
                         audio_filename,
                         audio_content_type,
                         audio_size,
