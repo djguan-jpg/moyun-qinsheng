@@ -7,11 +7,12 @@ const registrationApiBaseUrl = String(liveDataConfig.registrationApiBaseUrl || '
 let liveAdminSnapshot = null;
 
 function openDiscordAdmin() {
-  if (!liveDataApiBaseUrl) {
+  const adminApiBaseUrl = registrationApiBaseUrl || liveDataApiBaseUrl;
+  if (!adminApiBaseUrl) {
     showAdminToast('目前無法連接 Discord 管理後台，請稍後再試。');
     return;
   }
-  window.location.assign(`${liveDataApiBaseUrl}/admin`);
+  window.location.assign(`${adminApiBaseUrl}/admin`);
 }
 
 function showView(viewId, updateHash = true) {

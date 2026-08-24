@@ -1,7 +1,9 @@
 from datetime import UTC, datetime
+from urllib.parse import parse_qs, urlparse
 
 from fastapi.testclient import TestClient
 
+import moyun_backend.main as main
 from moyun_backend.main import Settings, create_app, open_database, registration_state
 
 
@@ -73,6 +75,41 @@ def test_health_reports_unconfigured_discord_and_initialises_database(tmp_path):
         "registrationStatus": "報名開放中",
     }
     assert settings.database_path.exists()
+
+
+def test_discord_server_owner_can_access_admin_dashboard_without_participant_role(tmp_path, monkeypatch):
+    settings = Settings(
+        client_id="client-id",
+        client_secret="client-secret",
+        guild_id="guild-id",
+        participant_role_id="participant-role",
+        redirect_uri="https://example.test/auth/callback",
+        session_secret="test-secret",
+        session_https_only=False,
+        database_path=tmp_path / "registrations.sqlite3",
+        registration_start_at=None,
+        registration_end_at=None,
+        public_base_path="/guyun",
+        admin_user_ids=frozenset({"server-owner"}),
+    )
+
+    async def fake_exchange(_settings, _code):
+        return {
+            "user": {"id": "server-owner", "username": "owner"},
+            "member": {"roles": []},
+        }
+
+    monkeypatch.setattr(main, "exchange_discord_code", fake_exchange)
+    with TestClient(create_app(settings)) as client:
+        login = client.get("/auth/login?next=admin", follow_redirects=False)
+        state = parse_qs(urlparse(login.headers["location"]).query)["state"][0]
+        callback = client.get(f"/auth/callback?code=test-code&state={state}", follow_redirects=False)
+        dashboard = client.get("/admin")
+
+    assert callback.status_code == 303
+    assert callback.headers["location"] == "/guyun/admin"
+    assert dashboard.status_code == 200
+    assert "古韻新生・管理後台" in dashboard.text
 
 
 def test_public_gallery_plays_uploaded_audio_without_exposing_discord_identity(tmp_path):

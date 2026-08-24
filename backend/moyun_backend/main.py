@@ -49,6 +49,7 @@ class Settings:
     registration_start_at: datetime | None
     registration_end_at: datetime | None
     public_base_path: str
+    admin_user_ids: frozenset[str] = frozenset()
 
     @property
     def discord_is_configured(self) -> bool:
@@ -79,6 +80,11 @@ def load_settings() -> Settings:
         registration_start_at=parse_datetime(os.getenv("REGISTRATION_START_AT", "")),
         registration_end_at=parse_datetime(os.getenv("REGISTRATION_END_AT", "")),
         public_base_path=normalise_base_path(os.getenv("PUBLIC_BASE_PATH", "")),
+        admin_user_ids=frozenset(
+            value.strip()
+            for value in os.getenv("DISCORD_ADMIN_USER_IDS", "").split(",")
+            if value.strip()
+        ),
     )
 
 
@@ -172,6 +178,10 @@ def get_current_user(request: Request) -> dict[str, str] | None:
     return user if isinstance(user, dict) else None
 
 
+def is_admin_user(user: dict[str, str] | None, settings: Settings) -> bool:
+    return bool(user and user.get("id") in settings.admin_user_ids)
+
+
 def page(title: str, body: str, *, status_code: int = 200) -> HTMLResponse:
     document = f"""<!doctype html>
 <html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -185,7 +195,8 @@ def page(title: str, body: str, *, status_code: int = 200) -> HTMLResponse:
   button,a.button {{ display:inline-block; width:fit-content; border:0; padding:12px 18px; background:#234d45; color:#fff; font:inherit; text-decoration:none; cursor:pointer; }}
   .notice {{ padding:13px 15px; border-left:4px solid #9d4733; background:#f6e9e3; }} .success {{ border-color:#28634c; background:#e6f1e9; }}
   .muted {{ color:#66736e; font-size:.92rem; }} .logout {{ margin-top:24px; background:transparent; color:#234d45; padding:0; text-decoration:underline; }}
-  .gallery {{ width:min(1060px,calc(100% - 40px)); }} .gallery-grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:18px; margin-top:24px; }} .work {{ padding:20px; border:1px solid #d8d1c3; background:#fff; }} .work h2 {{ margin:.3rem 0 .8rem; font-size:1.2rem; }} audio {{ width:100%; }}
+  .gallery,.admin {{ width:min(1060px,calc(100% - 40px)); }} .gallery-grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:18px; margin-top:24px; }} .work {{ padding:20px; border:1px solid #d8d1c3; background:#fff; }} .work h2 {{ margin:.3rem 0 .8rem; font-size:1.2rem; }} audio {{ width:100%; }}
+  .admin-stats {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin:24px 0; }} .admin-stats article {{ padding:18px; background:#f3f6f1; border:1px solid #d8d1c3; }} .admin-stats p,.admin-stats h2 {{ margin:.15rem 0; }} table {{ width:100%; border-collapse:collapse; margin-top:16px; }} th,td {{ padding:12px 8px; border-bottom:1px solid #ded8cb; text-align:left; vertical-align:top; }} th {{ color:#66736e; font-size:.82rem; }}
 </style></head><body><main>{body}</main></body></html>"""
     return HTMLResponse(document, status_code=status_code)
 
@@ -307,7 +318,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return FileResponse(path, media_type=media_type or "application/octet-stream")
 
     @app.get("/auth/login")
-    async def login(request: Request):
+    async def login(request: Request, next: str = ""):
         if not settings.discord_is_configured:
             return page(
                 "Discord 尚未設定",
@@ -316,6 +327,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         state = secrets.token_urlsafe(32)
         request.session["oauth_state"] = state
+        request.session["post_login_destination"] = "admin" if next == "admin" else "register"
         query = urlencode(
             {
                 "client_id": settings.client_id,
@@ -331,6 +343,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/auth/callback")
     async def callback(request: Request, code: str = "", state: str = ""):
         expected_state = request.session.pop("oauth_state", "")
+        post_login_destination = request.session.pop("post_login_destination", "register")
         if not code or not expected_state or not secrets.compare_digest(expected_state, state):
             return page("登入失敗", "<h1>登入驗證失敗</h1><p>請回到報名頁重新登入。</p>", status_code=400)
         try:
@@ -338,22 +351,68 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except httpx.HTTPError:
             return page("登入失敗", "<h1>無法完成 Discord 驗證</h1><p>請稍後再試；若問題持續，請聯絡主辦單位。</p>", status_code=502)
 
+        discord_user = discord["user"]
         roles = {str(role) for role in discord["member"].get("roles", [])}
-        if settings.participant_role_id and settings.participant_role_id not in roles:
+        is_admin = str(discord_user["id"]) in settings.admin_user_ids
+        if settings.participant_role_id and settings.participant_role_id not in roles and not is_admin:
             return page(
                 "尚未取得報名資格",
                 "<h1>尚未取得報名資格</h1><p>本活動僅開放持有「音樂創作者」身分組的 Discord 成員報名。</p>",
                 status_code=403,
             )
 
-        discord_user = discord["user"]
         member = discord["member"]
         request.session["discord_user"] = {
             "id": str(discord_user["id"]),
             "username": discord_user.get("global_name") or discord_user.get("username") or "Discord 使用者",
             "display_name": member.get("nick") or discord_user.get("global_name") or discord_user.get("username") or "Discord 使用者",
         }
+        if post_login_destination == "admin":
+            if not is_admin:
+                return page(
+                    "沒有管理權限",
+                    "<h1>沒有管理權限</h1><p>請使用活動 Discord 伺服器的管理員帳號登入。</p>",
+                    status_code=403,
+                )
+            return RedirectResponse(public_path(settings, "/admin"), status_code=303)
         return RedirectResponse(public_path(settings, "/register"), status_code=303)
+
+    @app.get("/admin")
+    async def admin(request: Request) -> HTMLResponse:
+        user = get_current_user(request)
+        if not user:
+            return RedirectResponse(public_path(settings, "/auth/login") + "?next=admin", status_code=303)
+        if not is_admin_user(user, settings):
+            return page(
+                "沒有管理權限",
+                "<h1>沒有管理權限</h1><p>此頁僅供活動 Discord 伺服器管理員使用。</p>",
+                status_code=403,
+            )
+        with open_database(settings.database_path) as connection:
+            total = connection.execute("SELECT COUNT(*) FROM registrations").fetchone()[0]
+            with_audio = connection.execute(
+                "SELECT COUNT(*) FROM registrations WHERE audio_filename IS NOT NULL"
+            ).fetchone()[0]
+            registrations = connection.execute(
+                """
+                SELECT id, work_title, category, description, audio_filename, audio_content_type, created_at
+                FROM registrations ORDER BY id DESC LIMIT 50
+                """
+            ).fetchall()
+        start = format_time(settings.registration_start_at) if settings.registration_start_at else "未設定"
+        end = format_time(settings.registration_end_at) if settings.registration_end_at else "未設定"
+        rows = "".join(
+            f"""<tr><td>#{item['id']:03d}</td><td><strong>{html.escape(item['work_title'])}</strong><br><span class=\"muted\">{html.escape(item['description'])}</span></td><td>{html.escape(item['category'])}</td><td>{html.escape(item['created_at'])}</td><td>{('<a href=\"' + public_path(settings, '/media/' + item['audio_filename']) + '\">播放音檔</a>') if item['audio_filename'] else '—'}</td></tr>"""
+            for item in registrations
+        ) or "<tr><td colspan=\"5\">目前尚無投稿資料。</td></tr>"
+        body = f"""
+<p class=\"eyebrow\">DISCORD ADMINISTRATION</p><h1>古韻新生・管理後台</h1>
+<p class=\"muted\">已登入為 {html.escape(user['display_name'])}。只有活動 Discord 伺服器管理員可存取此頁。</p>
+<div class=\"admin-stats\"><article><p>投稿總數</p><h2>{total}</h2></article><article><p>已上傳音檔</p><h2>{with_audio}</h2></article><article><p>報名開放</p><h2>{html.escape(start)}</h2></article><article><p>報名截止</p><h2>{html.escape(end)}</h2></article></div>
+<h2>最新投稿</h2><table><thead><tr><th>編號</th><th>作品</th><th>組別</th><th>提交時間</th><th>音檔</th></tr></thead><tbody>{rows}</tbody></table>
+<p><a class=\"button\" href=\"{public_path(settings, '/works')}\">查看公開展演</a></p>
+<form method=\"post\" action=\"{public_path(settings, '/auth/logout')}\"><button class=\"logout\" type=\"submit\">登出</button></form>"""
+        return page("管理後台", body)
 
     @app.get("/register")
     async def register(request: Request, saved: str = "", error: str = ""):
