@@ -50,6 +50,7 @@ class Settings:
     registration_end_at: datetime | None
     public_base_path: str
     admin_user_ids: frozenset[str] = frozenset()
+    admin_role_ids: frozenset[str] = frozenset()
 
     @property
     def discord_is_configured(self) -> bool:
@@ -83,6 +84,11 @@ def load_settings() -> Settings:
         admin_user_ids=frozenset(
             value.strip()
             for value in os.getenv("DISCORD_ADMIN_USER_IDS", "").split(",")
+            if value.strip()
+        ),
+        admin_role_ids=frozenset(
+            value.strip()
+            for value in os.getenv("DISCORD_ADMIN_ROLE_IDS", "").split(",")
             if value.strip()
         ),
     )
@@ -179,7 +185,10 @@ def get_current_user(request: Request) -> dict[str, str] | None:
 
 
 def is_admin_user(user: dict[str, str] | None, settings: Settings) -> bool:
-    return bool(user and user.get("id") in settings.admin_user_ids)
+    if not user:
+        return False
+    role_ids = set(filter(None, user.get("role_ids", "").split(",")))
+    return user.get("id") in settings.admin_user_ids or bool(role_ids & settings.admin_role_ids)
 
 
 def page(title: str, body: str, *, status_code: int = 200) -> HTMLResponse:
@@ -353,7 +362,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         discord_user = discord["user"]
         roles = {str(role) for role in discord["member"].get("roles", [])}
-        is_admin = str(discord_user["id"]) in settings.admin_user_ids
+        is_admin = str(discord_user["id"]) in settings.admin_user_ids or bool(
+            roles & settings.admin_role_ids
+        )
         if settings.participant_role_id and settings.participant_role_id not in roles and not is_admin:
             return page(
                 "尚未取得報名資格",
@@ -366,6 +377,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "id": str(discord_user["id"]),
             "username": discord_user.get("global_name") or discord_user.get("username") or "Discord 使用者",
             "display_name": member.get("nick") or discord_user.get("global_name") or discord_user.get("username") or "Discord 使用者",
+            "role_ids": ",".join(sorted(roles)),
         }
         if post_login_destination == "admin":
             if not is_admin:
@@ -385,7 +397,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not is_admin_user(user, settings):
             return page(
                 "沒有管理權限",
-                "<h1>沒有管理權限</h1><p>此頁僅供活動 Discord 伺服器管理員使用。</p>",
+                f"<h1>沒有管理權限</h1><p>此頁僅供活動 Discord 伺服器管理員使用。</p><a class=\"button\" href=\"{public_path(settings, '/auth/login')}?next=admin\">重新使用 Discord 登入</a>",
                 status_code=403,
             )
         with open_database(settings.database_path) as connection:

@@ -112,6 +112,40 @@ def test_discord_server_owner_can_access_admin_dashboard_without_participant_rol
     assert "古韻新生・管理後台" in dashboard.text
 
 
+def test_discord_administrator_role_can_access_admin_dashboard(tmp_path, monkeypatch):
+    settings = Settings(
+        client_id="client-id",
+        client_secret="client-secret",
+        guild_id="guild-id",
+        participant_role_id="participant-role",
+        redirect_uri="https://example.test/auth/callback",
+        session_secret="test-secret",
+        session_https_only=False,
+        database_path=tmp_path / "registrations.sqlite3",
+        registration_start_at=None,
+        registration_end_at=None,
+        public_base_path="",
+        admin_role_ids=frozenset({"administrator-role"}),
+    )
+
+    async def fake_exchange(_settings, _code):
+        return {
+            "user": {"id": "administrator", "username": "administrator"},
+            "member": {"roles": ["administrator-role"]},
+        }
+
+    monkeypatch.setattr(main, "exchange_discord_code", fake_exchange)
+    with TestClient(create_app(settings)) as client:
+        login = client.get("/auth/login?next=admin", follow_redirects=False)
+        state = parse_qs(urlparse(login.headers["location"]).query)["state"][0]
+        callback = client.get(f"/auth/callback?code=test-code&state={state}", follow_redirects=False)
+        dashboard = client.get("/admin")
+
+    assert callback.status_code == 303
+    assert callback.headers["location"] == "/admin"
+    assert dashboard.status_code == 200
+
+
 def test_public_gallery_plays_uploaded_audio_without_exposing_discord_identity(tmp_path):
     settings = Settings(
         client_id="",
