@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import mimetypes
 import os
 import secrets
 import sqlite3
@@ -14,13 +15,22 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from dotenv import load_dotenv
+from starlette.datastructures import UploadFile
 from starlette.middleware.sessions import SessionMiddleware
 
 TAIPEI = ZoneInfo("Asia/Taipei")
 DISCORD_API = "https://discord.com/api"
 OAUTH_SCOPES = "identify guilds.members.read"
+MAX_AUDIO_BYTES = 25 * 1024 * 1024
+ALLOWED_AUDIO_TYPES = {
+    ".mp3": {"audio/mpeg", "audio/mp3", "application/octet-stream"},
+    ".m4a": {"audio/mp4", "audio/x-m4a", "application/octet-stream"},
+    ".wav": {"audio/wav", "audio/x-wav", "audio/wave", "application/octet-stream"},
+    ".ogg": {"audio/ogg", "application/ogg", "application/octet-stream"},
+    ".webm": {"audio/webm", "application/octet-stream"},
+}
 
 # Docker Compose injects these values itself.  Local development reads backend/.env.
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
@@ -101,10 +111,47 @@ def initialise_database(path: Path) -> None:
                 category TEXT NOT NULL,
                 description TEXT NOT NULL,
                 contact_email TEXT NOT NULL,
+                audio_filename TEXT,
+                audio_content_type TEXT,
+                audio_size INTEGER,
                 created_at TEXT NOT NULL
             )
             """
         )
+        columns = {row["name"] for row in connection.execute("PRAGMA table_info(registrations)")}
+        for column, definition in {
+            "audio_filename": "TEXT",
+            "audio_content_type": "TEXT",
+            "audio_size": "INTEGER",
+        }.items():
+            if column not in columns:
+                connection.execute(f"ALTER TABLE registrations ADD COLUMN {column} {definition}")
+
+
+def uploads_directory(settings: Settings) -> Path:
+    directory = settings.database_path.parent / "uploads"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+async def save_audio_upload(upload: UploadFile, settings: Settings) -> tuple[str, str, int]:
+    original_name = upload.filename or ""
+    extension = Path(original_name).suffix.lower()
+    content_type = (upload.content_type or "").lower()
+    allowed_types = ALLOWED_AUDIO_TYPES.get(extension)
+    if not allowed_types or content_type not in allowed_types:
+        raise HTTPException(
+            status_code=400,
+            detail="請上傳 MP3、M4A、WAV、OGG 或 WEBM 音檔。",
+        )
+    content = await upload.read(MAX_AUDIO_BYTES + 1)
+    if not content:
+        raise HTTPException(status_code=400, detail="音檔內容不可為空。")
+    if len(content) > MAX_AUDIO_BYTES:
+        raise HTTPException(status_code=400, detail="音檔大小不可超過 25 MB。")
+    filename = f"{secrets.token_urlsafe(18)}{extension}"
+    (uploads_directory(settings) / filename).write_bytes(content)
+    return filename, content_type, len(content)
 
 
 def registration_state(settings: Settings, now: datetime | None = None) -> tuple[bool, str]:
@@ -138,6 +185,7 @@ def page(title: str, body: str, *, status_code: int = 200) -> HTMLResponse:
   button,a.button {{ display:inline-block; width:fit-content; border:0; padding:12px 18px; background:#234d45; color:#fff; font:inherit; text-decoration:none; cursor:pointer; }}
   .notice {{ padding:13px 15px; border-left:4px solid #9d4733; background:#f6e9e3; }} .success {{ border-color:#28634c; background:#e6f1e9; }}
   .muted {{ color:#66736e; font-size:.92rem; }} .logout {{ margin-top:24px; background:transparent; color:#234d45; padding:0; text-decoration:underline; }}
+  .gallery {{ width:min(1060px,calc(100% - 40px)); }} .gallery-grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:18px; margin-top:24px; }} .work {{ padding:20px; border:1px solid #d8d1c3; background:#fff; }} .work h2 {{ margin:.3rem 0 .8rem; font-size:1.2rem; }} audio {{ width:100%; }}
 </style></head><body><main>{body}</main></body></html>"""
     return HTMLResponse(document, status_code=status_code)
 
@@ -216,8 +264,47 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 <p class="eyebrow">GUYUN XINSHENG</p><h1>古韻新生・線上報名</h1>
 {notice(message, success=is_open)}
 <p>以 Discord 驗證身分後，即可提交古風音樂作品資料。每個 Discord 帳號限一筆有效報名。</p>
-<a class="button" href="{public_path(settings, '/register')}">{login_label}</a>"""
+<a class="button" href="{public_path(settings, '/register')}">{login_label}</a>
+<a class="button" href="{public_path(settings, '/works')}">聆聽公開作品</a>"""
         return page("線上報名", body)
+
+    @app.get("/works")
+    async def public_works() -> HTMLResponse:
+        with open_database(settings.database_path) as connection:
+            works = connection.execute(
+                """
+                SELECT id, work_title, category, description, audio_filename, audio_content_type, created_at
+                FROM registrations
+                WHERE audio_filename IS NOT NULL
+                ORDER BY id DESC
+                """
+            ).fetchall()
+        if not works:
+            body = f"""
+<p class="eyebrow">PUBLIC LISTENING GALLERY</p><h1>公開作品展演</h1>
+{notice("目前尚無公開作品；首件完成投稿的作品將會出現在這裡。")}
+<a class="button" href="{public_path(settings, '/')}">回到報名入口</a>"""
+            return page("公開作品展演", body)
+        cards = "".join(
+            f"""<article class="work"><p class="eyebrow">匿名作品 #{work['id']:03d}・{html.escape(work['category'])}</p>
+<h2>{html.escape(work['work_title'])}</h2><p class="muted">{html.escape(work['description'])}</p>
+<audio controls preload="metadata"><source src="{public_path(settings, '/media/' + work['audio_filename'])}" type="{html.escape(work['audio_content_type'] or 'audio/mpeg')}">你的瀏覽器不支援音檔播放。</audio></article>"""
+            for work in works
+        )
+        body = f"""
+<p class="eyebrow">PUBLIC LISTENING GALLERY</p><h1>公開作品展演</h1>
+<p>以下作品已由創作者投稿；創作者 Discord 身分不會公開。</p><div class="gallery-grid">{cards}</div>"""
+        return page("公開作品展演", body)
+
+    @app.get("/media/{audio_filename}")
+    async def stream_audio(audio_filename: str) -> FileResponse:
+        if Path(audio_filename).name != audio_filename:
+            raise HTTPException(status_code=404, detail="找不到音檔。")
+        path = uploads_directory(settings) / audio_filename
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="找不到音檔。")
+        media_type, _ = mimetypes.guess_type(path.name)
+        return FileResponse(path, media_type=media_type or "application/octet-stream")
 
     @app.get("/auth/login")
     async def login(request: Request):
@@ -288,7 +375,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if existing:
             return page(
                 "已完成報名",
-                f"<h1>你已完成報名</h1>{notice('已收到《' + existing['work_title'] + '》的資料。', success=True)}<p>提交時間：{html.escape(existing['created_at'])}</p>",
+                f"<h1>你已完成報名</h1>{notice('已收到《' + existing['work_title'] + '》的資料。', success=True)}<p>提交時間：{html.escape(existing['created_at'])}</p><a class=\"button\" href=\"{public_path(settings, '/works')}\">聆聽公開作品</a>",
             )
         messages = ""
         if saved:
@@ -298,11 +385,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         body = f"""
 <p class="eyebrow">DISCORD VERIFIED ENTRY</p><h1>提交參賽作品</h1>
 <p class="muted">登入帳號：{html.escape(user['display_name'])}</p>{messages}
-<form method="post" action="{public_path(settings, '/register')}">
+<form method="post" action="{public_path(settings, '/register')}" enctype="multipart/form-data">
   <input type="hidden" name="csrf_token" value="{request.session['csrf_token']}">
   <label>作品名稱<input name="work_title" required maxlength="200" placeholder="請輸入作品名稱"></label>
   <label>參賽組別<select name="category"><option value="古風音樂">古風音樂</option></select></label>
   <label>作品簡介<textarea name="description" required maxlength="2000" placeholder="請介紹創作理念、樂器與曲風"></textarea></label>
+  <label>作品音檔<input name="audio_file" required type="file" accept="audio/mpeg,audio/mp4,audio/wav,audio/ogg,audio/webm,.mp3,.m4a,.wav,.ogg,.webm"></label>
+  <p class="muted">支援 MP3、M4A、WAV、OGG、WEBM，檔案大小上限 25 MB。完成送出後，音檔會立即顯示於公開作品展演頁供其他人播放。</p>
   <label>聯絡信箱<input name="contact_email" required type="email" maxlength="254" placeholder="name@example.com"></label>
   <label><span><input name="agreement" value="yes" type="checkbox" required> 我確認資料正確，並同意活動規則。</span></label>
   <button type="submit">送出報名資料</button>
@@ -328,17 +417,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         description = str(form.get("description", "")).strip()
         contact_email = str(form.get("contact_email", "")).strip()
         agreement = str(form.get("agreement", ""))
-        if not (work_title and category and description and contact_email and agreement == "yes"):
+        audio_upload = form.get("audio_file")
+        if not (work_title and category and description and contact_email and agreement == "yes" and isinstance(audio_upload, UploadFile)):
             return RedirectResponse(public_path(settings, "/register") + "?error=請完整填寫所有必填欄位。", status_code=303)
         if len(work_title) > 200 or len(description) > 2000 or len(contact_email) > 254:
             return RedirectResponse(public_path(settings, "/register") + "?error=欄位內容超過允許長度。", status_code=303)
+        try:
+            audio_filename, audio_content_type, audio_size = await save_audio_upload(audio_upload, settings)
+        except HTTPException as error:
+            return RedirectResponse(public_path(settings, "/register") + "?error=" + str(error.detail), status_code=303)
         try:
             with open_database(settings.database_path) as connection:
                 connection.execute(
                     """
                     INSERT INTO registrations
-                    (discord_user_id, discord_username, display_name, work_title, category, description, contact_email, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    (discord_user_id, discord_username, display_name, work_title, category, description, contact_email, audio_filename, audio_content_type, audio_size, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         user["id"],
@@ -348,10 +442,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         category,
                         description,
                         contact_email,
+                        audio_filename,
+                        audio_content_type,
+                        audio_size,
                         datetime.now(TAIPEI).strftime("%Y-%m-%d %H:%M:%S %Z"),
                     ),
                 )
         except sqlite3.IntegrityError:
+            (uploads_directory(settings) / audio_filename).unlink(missing_ok=True)
             return RedirectResponse(public_path(settings, "/register"), status_code=303)
         return RedirectResponse(public_path(settings, "/register") + "?saved=1", status_code=303)
 

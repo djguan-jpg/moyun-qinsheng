@@ -157,6 +157,14 @@ function startDiscordRegistration() {
   window.location.assign(`${registrationApiBaseUrl}/register`);
 }
 
+function openPublicWorks() {
+  if (!registrationApiBaseUrl) {
+    showAdminToast('目前無法連接公開作品展演。');
+    return;
+  }
+  window.location.assign(`${registrationApiBaseUrl}/works`);
+}
+
 function openLiveWorksManager() {
   if (!liveDataApiBaseUrl) {
     showAdminToast('目前無法連接作品上傳服務，請稍後再試。');
@@ -293,11 +301,11 @@ function renderPublicWorks(works) {
     const copy = document.createElement('p');
     const button = document.createElement('button');
     empty.className = 'works-empty';
-    title.textContent = '第一首旋律，等待你投稿';
-    copy.textContent = '目前尚無公開作品，登入 Discord 即可完成投稿。';
+    title.textContent = '公開作品展間';
+    copy.textContent = '投稿作品會在完成送出後顯示於公開展間，供所有訪客播放。';
     button.type = 'button';
-    button.textContent = '使用 Discord 登入投稿 →';
-    button.addEventListener('click', startDiscordRegistration);
+    button.textContent = '開啟公開作品展間 →';
+    button.addEventListener('click', openPublicWorks);
     empty.append(title, copy, button);
     publicWorksContainer.replaceChildren(empty);
     return;
@@ -405,11 +413,11 @@ async function hydratePublicCompetition() {
       const copy = document.createElement('p');
       const button = document.createElement('button');
       empty.className = 'works-empty';
-      title.textContent = '作品展間正在同步';
-      copy.textContent = '你仍可前往正式匿名展間聆聽作品。';
+      title.textContent = '作品展間已開放';
+      copy.textContent = '可前往公開作品展間播放創作者上傳的音檔。';
       button.type = 'button';
-      button.textContent = '開啟正式作品展間 →';
-      button.addEventListener('click', () => window.location.assign(`${liveDataApiBaseUrl}/vote`));
+      button.textContent = '開啟公開作品展間 →';
+      button.addEventListener('click', openPublicWorks);
       empty.append(title, copy, button);
       publicWorksContainer.replaceChildren(empty);
     }
@@ -417,7 +425,7 @@ async function hydratePublicCompetition() {
 }
 
 async function shareCompetition(kind) {
-  const registrationUrl = `${liveDataApiBaseUrl}/register`;
+  const registrationUrl = `${registrationApiBaseUrl}/register`;
   const messages = {
     share: '古韻新生古風音樂大賽現正開放投稿，以匿名投票讓每一段旋律公平被聽見。',
     invite: '邀請你參加「古韻新生」古風音樂大賽！只要擁有 Discord 音樂創作者身分即可投稿。',
@@ -438,6 +446,7 @@ async function shareCompetition(kind) {
 
 document.querySelector('[data-share-discord]')?.addEventListener('click', () => shareCompetition('share'));
 document.querySelector('[data-invite-creator]')?.addEventListener('click', () => shareCompetition('invite'));
+document.querySelector('[data-open-public-gallery]')?.addEventListener('click', openPublicWorks);
 document.querySelector('[data-open-official-vote]')?.addEventListener('click', () => {
   if (liveDataApiBaseUrl) window.location.assign(`${liveDataApiBaseUrl}/vote`);
 });

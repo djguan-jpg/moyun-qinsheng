@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 
-from moyun_backend.main import Settings, create_app, registration_state
+from moyun_backend.main import Settings, create_app, open_database, registration_state
 
 
 def test_registration_waits_for_scheduled_start(tmp_path):
@@ -52,3 +52,56 @@ def test_health_reports_unconfigured_discord_and_initialises_database(tmp_path):
         "registrationStatus": "報名開放中",
     }
     assert settings.database_path.exists()
+
+
+def test_public_gallery_plays_uploaded_audio_without_exposing_discord_identity(tmp_path):
+    settings = Settings(
+        client_id="",
+        client_secret="",
+        guild_id="",
+        participant_role_id="",
+        redirect_uri="",
+        session_secret="test-secret",
+        session_https_only=False,
+        database_path=tmp_path / "data" / "registrations.sqlite3",
+        registration_start_at=None,
+        registration_end_at=None,
+        public_base_path="/guyun",
+    )
+    audio_path = settings.database_path.parent / "uploads" / "sample.mp3"
+    audio_path.parent.mkdir(parents=True)
+    audio_path.write_bytes(b"fake-mp3-data")
+
+    with TestClient(create_app(settings)) as client:
+        with open_database(settings.database_path) as connection:
+            connection.execute(
+                """
+                INSERT INTO registrations
+                (discord_user_id, discord_username, display_name, work_title, category, description, contact_email,
+                 audio_filename, audio_content_type, audio_size, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "1",
+                    "private-username",
+                    "私人顯示名稱",
+                    "月下長安",
+                    "古風音樂",
+                    "一段公開的旋律。",
+                    "creator@example.com",
+                    "sample.mp3",
+                    "audio/mpeg",
+                    13,
+                    "2026-08-25 12:00:00 CST",
+                ),
+            )
+        gallery = client.get("/works")
+        media = client.get("/media/sample.mp3")
+
+    assert gallery.status_code == 200
+    assert "月下長安" in gallery.text
+    assert "/guyun/media/sample.mp3" in gallery.text
+    assert "private-username" not in gallery.text
+    assert "私人顯示名稱" not in gallery.text
+    assert media.status_code == 200
+    assert media.content == b"fake-mp3-data"
