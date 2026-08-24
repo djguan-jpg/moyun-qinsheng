@@ -197,3 +197,51 @@ def test_public_gallery_plays_uploaded_audio_without_exposing_discord_identity(t
     assert "私人顯示名稱" not in gallery.text
     assert media.status_code == 200
     assert media.content == b"fake-mp3-data"
+
+
+def test_public_gallery_hides_admin_test_uploads(tmp_path):
+    settings = Settings(
+        client_id="",
+        client_secret="",
+        guild_id="",
+        participant_role_id="",
+        redirect_uri="",
+        session_secret="test-secret",
+        session_https_only=False,
+        database_path=tmp_path / "data" / "registrations.sqlite3",
+        registration_start_at=None,
+        registration_end_at=None,
+        public_base_path="",
+    )
+    audio_path = settings.database_path.parent / "uploads" / "test.mp3"
+    audio_path.parent.mkdir(parents=True)
+    audio_path.write_bytes(b"test-audio")
+
+    with TestClient(create_app(settings)) as client:
+        with open_database(settings.database_path) as connection:
+            connection.execute(
+                """
+                INSERT INTO registrations
+                (discord_user_id, discord_username, display_name, work_title, category, description, contact_email,
+                 audio_filename, audio_content_type, audio_size, is_test, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "test-work",
+                    "管理後台測試",
+                    "管理後台測試",
+                    "僅限後台測試",
+                    "測試作品",
+                    "不應出現在公開展間。",
+                    "",
+                    "test.mp3",
+                    "audio/mpeg",
+                    10,
+                    1,
+                    "2026-08-25 12:00:00 CST",
+                ),
+            )
+        gallery = client.get("/works")
+
+    assert gallery.status_code == 200
+    assert "僅限後台測試" not in gallery.text
