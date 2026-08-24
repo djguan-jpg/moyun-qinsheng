@@ -1,0 +1,9 @@
+services:
+  registration:
+    build: .
+    env_file: .env
+    expose:
+      - "8010"
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

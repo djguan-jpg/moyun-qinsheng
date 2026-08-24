@@ -3,6 +3,7 @@ const views = document.querySelectorAll('.view');
 const navLinks = document.querySelectorAll('.main-nav a');
 const liveDataConfig = window.MOYUN_BACKEND_CONFIG || {};
 const liveDataApiBaseUrl = String(liveDataConfig.apiBaseUrl || '').replace(/\/+$/, '');
+const registrationApiBaseUrl = String(liveDataConfig.registrationApiBaseUrl || '').replace(/\/+$/, '');
 const liveAdminTokenKey = 'moyun-live-admin-token';
 let liveAdminSnapshot = null;
 function showView(viewId, updateHash = true) {
@@ -144,11 +145,11 @@ function requestLiveDataAuthorization() {
 }
 
 function startDiscordRegistration() {
-  if (!liveDataApiBaseUrl) {
+  if (!registrationApiBaseUrl) {
     showAdminToast('目前無法連接 Discord 報名服務，請稍後再試。');
     return;
   }
-  window.location.assign(`${liveDataApiBaseUrl}/register`);
+  window.location.assign(`${registrationApiBaseUrl}/register`);
 }
 
 document.querySelectorAll('[data-discord-register]').forEach((button) => {

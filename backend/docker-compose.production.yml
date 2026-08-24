@@ -1,0 +1,11 @@
+services:
+  registration:
+    networks:
+      caddy:
+        aliases:
+          - guyun-registration
+
+networks:
+  caddy:
+    external: true
+    name: ai-song-contest_default
