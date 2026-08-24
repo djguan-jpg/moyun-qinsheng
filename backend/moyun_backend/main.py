@@ -285,7 +285,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         body = f"""
 <p class="eyebrow">GUYUN XINSHENG</p><h1>古韻新生・線上報名</h1>
 {notice(message, success=is_open)}
-<p>以 Discord 驗證身分後，即可提交古風音樂作品資料。每個 Discord 帳號限一筆有效報名。</p>
+<p>以 Discord 驗證身分後，即可提交古風音樂作品資料。每個 Discord 帳號限一筆有效報名；投稿結束後將進入開放所有人參與的公開投票淘汰賽，最後設敗部復活賽。</p>
 <a class="button" href="{public_path(settings, '/register')}">{login_label}</a>
 <a class="button" href="{public_path(settings, '/works')}">聆聽公開作品</a>"""
         return page("線上報名", body)
