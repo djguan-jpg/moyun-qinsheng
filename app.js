@@ -4,15 +4,26 @@ const navLinks = document.querySelectorAll('.main-nav a');
 const liveDataConfig = window.MOYUN_BACKEND_CONFIG || {};
 const liveDataApiBaseUrl = String(liveDataConfig.apiBaseUrl || '').replace(/\/+$/, '');
 const registrationApiBaseUrl = String(liveDataConfig.registrationApiBaseUrl || '').replace(/\/+$/, '');
-const liveAdminTokenKey = 'moyun-live-admin-token';
 let liveAdminSnapshot = null;
+
+function openDiscordAdmin() {
+  if (!liveDataApiBaseUrl) {
+    showAdminToast('目前無法連接 Discord 管理後台，請稍後再試。');
+    return;
+  }
+  window.location.assign(`${liveDataApiBaseUrl}/admin`);
+}
+
 function showView(viewId, updateHash = true) {
+  if (viewId === 'admin') {
+    openDiscordAdmin();
+    return;
+  }
   views.forEach((view) => view.classList.toggle('active', view.id === viewId));
   navLinks.forEach((link) => link.classList.toggle('active', link.dataset.view === viewId));
   document.querySelector('.main-nav').classList.remove('open');
-  document.body.classList.toggle('admin-mode', viewId === 'admin');
+  document.body.classList.remove('admin-mode');
   if (updateHash && window.location.hash !== `#${viewId}`) window.history.replaceState(null, '', `#${viewId}`);
-  if (viewId === 'admin') window.requestAdminAccess?.();
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 viewButtons.forEach((button) => button.addEventListener('click', (event) => {
@@ -73,20 +84,18 @@ updateAdminCurrentTime();
 window.setInterval(updateAdminCurrentTime, 1000);
 
 function getRequestedView() {
-  const [viewId, rawParameters = ''] = window.location.hash.slice(1).split('?');
-  const adminToken = new URLSearchParams(rawParameters).get('admin_token');
-  if (viewId === 'admin' && adminToken) {
-    sessionStorage.setItem(liveAdminTokenKey, adminToken);
-    window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}#admin`);
-  }
-  return viewId;
+  return window.location.hash.slice(1).split('?')[0];
+}
+
+function isKnownView(viewId) {
+  return Array.from(views).some((view) => view.id === viewId);
 }
 
 const requestedView = getRequestedView();
-if (requestedView && document.getElementById(requestedView)) showView(requestedView, false);
+if (requestedView && isKnownView(requestedView)) showView(requestedView, false);
 window.addEventListener('hashchange', () => {
   const viewId = getRequestedView();
-  if (viewId && document.getElementById(viewId)) showView(viewId, false);
+  if (viewId && isKnownView(viewId)) showView(viewId, false);
 });
 
 function showAdminToast(message) {
@@ -133,15 +142,11 @@ function setLiveDataStatus(message, state = 'pending') {
 function updateLiveDataConnectButton() {
   const button = document.querySelector('[data-live-data-connect]');
   if (!button) return;
-  button.textContent = sessionStorage.getItem(liveAdminTokenKey) ? '更新資料 ↻' : '連接資料';
+  button.textContent = 'Discord 管理後台 ↗';
 }
 
 function requestLiveDataAuthorization() {
-  if (!liveDataApiBaseUrl) {
-    showAdminToast('尚未設定資料伺服器。');
-    return;
-  }
-  window.location.assign(`${liveDataApiBaseUrl}/moyun/admin/connect`);
+  openDiscordAdmin();
 }
 
 function startDiscordRegistration() {
@@ -152,12 +157,293 @@ function startDiscordRegistration() {
   window.location.assign(`${registrationApiBaseUrl}/register`);
 }
 
+function openLiveWorksManager() {
+  if (!liveDataApiBaseUrl) {
+    showAdminToast('目前無法連接作品上傳服務，請稍後再試。');
+    return;
+  }
+  const adminUrl = liveAdminSnapshot?.adminUrl || `${liveDataApiBaseUrl}/admin`;
+  const uploadUrl = new URL(adminUrl);
+  uploadUrl.hash = 'proxy-registration';
+  window.location.assign(uploadUrl.toString());
+}
+
 document.querySelectorAll('[data-discord-register]').forEach((button) => {
   button.addEventListener('click', (event) => {
     event.preventDefault();
     startDiscordRegistration();
   });
 });
+
+const publicCompetitionApiUrl = liveDataApiBaseUrl
+  ? `${liveDataApiBaseUrl}/api/public/competition?contest=guyun`
+  : '';
+const publicWorksContainer = document.querySelector('[data-public-works]');
+const scheduleContainer = document.querySelector('[data-competition-schedule]');
+let countdownTarget = scheduleContainer?.dataset.deadline
+  ? new Date(scheduleContainer.dataset.deadline)
+  : null;
+let countdownTimer;
+
+function formatAudioTime(value) {
+  if (!Number.isFinite(value) || value < 0) return '--:--';
+  const minutes = Math.floor(value / 60);
+  const seconds = Math.floor(value % 60);
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+function pauseOtherWorkPlayers(currentAudio) {
+  document.querySelectorAll('.work-audio').forEach((audio) => {
+    if (audio !== currentAudio && !audio.paused) audio.pause();
+  });
+}
+
+function createWaveform() {
+  const waveform = document.createElement('span');
+  waveform.className = 'work-waveform';
+  waveform.setAttribute('aria-hidden', 'true');
+  for (let index = 0; index < 32; index += 1) {
+    const bar = document.createElement('i');
+    const height = 11 + ((index * 19 + 17) % 28);
+    bar.style.setProperty('--height', `${height}px`);
+    bar.style.setProperty('--delay', `${(index % 8) * -0.075}s`);
+    waveform.append(bar);
+  }
+  return waveform;
+}
+
+function createPublicWorkCard(work, index) {
+  const card = document.createElement('article');
+  const artwork = document.createElement('div');
+  const artworkLabel = document.createElement('span');
+  const copy = document.createElement('div');
+  const category = document.createElement('p');
+  const title = document.createElement('h3');
+  const description = document.createElement('p');
+  const player = document.createElement('div');
+  const playButton = document.createElement('button');
+  const waveform = createWaveform();
+  const time = document.createElement('span');
+  const audio = document.createElement('audio');
+
+  card.className = `work-card public-work-card variant-${(index % 3) + 1}`;
+  artwork.className = 'work-image';
+  artworkLabel.className = 'play';
+  artworkLabel.textContent = String(index + 1).padStart(2, '0');
+  artwork.append(artworkLabel);
+  category.textContent = work.hasLyrics ? '古風音樂 · 含匿名歌詞' : '古風音樂 · 匿名展演';
+  title.textContent = work.code || `匿名作品 ${String(index + 1).padStart(2, '0')}`;
+  description.className = 'work-description';
+  description.textContent = '作品資料將於投票結束後由主辦單位統一公開。';
+  player.className = 'work-player';
+  playButton.type = 'button';
+  playButton.className = 'work-play-toggle';
+  playButton.textContent = '▶';
+  playButton.setAttribute('aria-label', `播放${title.textContent}`);
+  time.className = 'work-time';
+  time.textContent = '0:00 / --:--';
+  audio.className = 'work-audio';
+  audio.preload = 'none';
+  audio.src = work.listenUrl;
+  audio.setAttribute('controlsList', 'nodownload');
+
+  playButton.addEventListener('click', () => {
+    if (audio.paused) {
+      pauseOtherWorkPlayers(audio);
+      audio.play().catch(() => showAdminToast('音訊暫時無法播放，請稍後再試。'));
+    } else {
+      audio.pause();
+    }
+  });
+  audio.addEventListener('play', () => {
+    pauseOtherWorkPlayers(audio);
+    card.classList.add('is-playing');
+    playButton.textContent = 'Ⅱ';
+    playButton.setAttribute('aria-label', `暫停${title.textContent}`);
+  });
+  audio.addEventListener('pause', () => {
+    card.classList.remove('is-playing');
+    playButton.textContent = '▶';
+    playButton.setAttribute('aria-label', `播放${title.textContent}`);
+  });
+  audio.addEventListener('timeupdate', () => {
+    const progress = audio.duration ? (audio.currentTime / audio.duration) * 100 : 0;
+    waveform.style.setProperty('--progress', `${Math.min(100, progress)}%`);
+    time.textContent = `${formatAudioTime(audio.currentTime)} / ${formatAudioTime(audio.duration)}`;
+  });
+  audio.addEventListener('loadedmetadata', () => {
+    time.textContent = `0:00 / ${formatAudioTime(audio.duration)}`;
+  });
+  audio.addEventListener('ended', () => {
+    waveform.style.setProperty('--progress', '0%');
+    audio.currentTime = 0;
+  });
+
+  player.append(playButton, waveform, time, audio);
+  copy.append(category, title, description, player);
+  card.append(artwork, copy);
+  return card;
+}
+
+function renderPublicWorks(works) {
+  if (!publicWorksContainer) return;
+  if (!works.length) {
+    const empty = document.createElement('div');
+    const title = document.createElement('strong');
+    const copy = document.createElement('p');
+    const button = document.createElement('button');
+    empty.className = 'works-empty';
+    title.textContent = '第一首旋律，等待你投稿';
+    copy.textContent = '目前尚無公開作品，登入 Discord 即可完成投稿。';
+    button.type = 'button';
+    button.textContent = '使用 Discord 登入投稿 →';
+    button.addEventListener('click', startDiscordRegistration);
+    empty.append(title, copy, button);
+    publicWorksContainer.replaceChildren(empty);
+    return;
+  }
+  publicWorksContainer.replaceChildren(...works.map(createPublicWorkCard));
+}
+
+function setCountdownValue(selector, value) {
+  const element = scheduleContainer?.querySelector(selector);
+  if (element) element.textContent = String(Math.max(0, value)).padStart(2, '0');
+}
+
+function updateCountdown() {
+  if (!scheduleContainer || !countdownTarget || Number.isNaN(countdownTarget.valueOf())) return;
+  const remaining = Math.max(0, countdownTarget.getTime() - Date.now());
+  setCountdownValue('[data-countdown-days]', Math.floor(remaining / 86400000));
+  setCountdownValue('[data-countdown-hours]', Math.floor((remaining / 3600000) % 24));
+  setCountdownValue('[data-countdown-minutes]', Math.floor((remaining / 60000) % 60));
+  setCountdownValue('[data-countdown-seconds]', Math.floor((remaining / 1000) % 60));
+  if (remaining === 0 && countdownTimer) window.clearInterval(countdownTimer);
+}
+
+function updateScheduleStages(submission, voting) {
+  const submissionStage = scheduleContainer?.querySelector('[data-schedule-stage="submission"]');
+  const votingStage = scheduleContainer?.querySelector('[data-schedule-stage="voting"]');
+  [submissionStage, votingStage].forEach((stage) => stage?.classList.remove('active', 'complete'));
+  if (submission?.status === 'ended') submissionStage?.classList.add('complete');
+  else submissionStage?.classList.add('active');
+  if (submission?.status === 'ended' && voting?.status === 'open') votingStage?.classList.add('active');
+  else if (voting?.status === 'ended') votingStage?.classList.add('complete');
+}
+
+function applyCompetitionSchedule(schedule) {
+  if (!scheduleContainer || !schedule) return;
+  const submission = schedule.submission || {};
+  const voting = schedule.voting || {};
+  const badge = scheduleContainer.querySelector('[data-live-status]');
+  const period = scheduleContainer.querySelector('[data-live-period]');
+  const label = scheduleContainer.querySelector('[data-countdown-label]');
+  const fallbackDeadline = new Date(scheduleContainer.dataset.deadline);
+
+  if (submission.status === 'upcoming' && submission.startAt) {
+    countdownTarget = new Date(submission.startAt);
+    if (badge) badge.textContent = '投稿即將開始';
+    if (label) label.textContent = '投稿開始倒數';
+  } else if (submission.status !== 'ended') {
+    countdownTarget = submission.endAt ? new Date(submission.endAt) : fallbackDeadline;
+    if (badge) badge.textContent = 'Discord 投稿進行中';
+    if (label) label.textContent = '報名截止倒數';
+  } else if (voting.status === 'upcoming' && voting.startAt) {
+    countdownTarget = new Date(voting.startAt);
+    if (badge) badge.textContent = '投稿已截止';
+    if (label) label.textContent = '匿名投票開始倒數';
+  } else if (voting.status === 'open' && voting.endAt) {
+    countdownTarget = new Date(voting.endAt);
+    if (badge) badge.textContent = '匿名投票進行中';
+    if (label) label.textContent = '本階段投票截止倒數';
+  } else {
+    countdownTarget = null;
+    if (badge) {
+      badge.textContent = '本階段已結束';
+      badge.dataset.state = 'ended';
+    }
+    if (label) label.textContent = '下一階段時間將另行公告';
+    ['[data-countdown-days]', '[data-countdown-hours]', '[data-countdown-minutes]', '[data-countdown-seconds]']
+      .forEach((selector) => setCountdownValue(selector, 0));
+  }
+  if (period && submission.endAt) {
+    period.textContent = `報名期間：${submission.period}（台灣時間）`;
+  }
+  updateScheduleStages(submission, voting);
+  updateCountdown();
+}
+
+async function hydratePublicCompetition() {
+  updateCountdown();
+  countdownTimer = window.setInterval(updateCountdown, 1000);
+  if (!publicCompetitionApiUrl) {
+    renderPublicWorks([]);
+    return;
+  }
+  try {
+    const response = await fetch(publicCompetitionApiUrl, {
+      headers: { Accept: 'application/json' },
+      mode: 'cors',
+    });
+    if (!response.ok) throw new Error(`Competition API returned ${response.status}`);
+    const data = await response.json();
+    if (data.sourceAvailable === false) {
+      renderPublicWorks([]);
+      const officialVoteButton = document.querySelector('[data-open-official-vote]');
+      if (officialVoteButton) {
+        officialVoteButton.disabled = true;
+        officialVoteButton.textContent = '正式投票尚未開放';
+      }
+      return;
+    }
+    renderPublicWorks(Array.isArray(data.works) ? data.works : []);
+    applyCompetitionSchedule(data.schedule);
+  } catch (error) {
+    console.debug('Public competition data unavailable', error);
+    if (publicWorksContainer) {
+      const empty = document.createElement('div');
+      const title = document.createElement('strong');
+      const copy = document.createElement('p');
+      const button = document.createElement('button');
+      empty.className = 'works-empty';
+      title.textContent = '作品展間正在同步';
+      copy.textContent = '你仍可前往正式匿名展間聆聽作品。';
+      button.type = 'button';
+      button.textContent = '開啟正式作品展間 →';
+      button.addEventListener('click', () => window.location.assign(`${liveDataApiBaseUrl}/vote`));
+      empty.append(title, copy, button);
+      publicWorksContainer.replaceChildren(empty);
+    }
+  }
+}
+
+async function shareCompetition(kind) {
+  const registrationUrl = `${liveDataApiBaseUrl}/register`;
+  const messages = {
+    share: '古韻新生古風音樂大賽現正開放投稿，以匿名投票讓每一段旋律公平被聽見。',
+    invite: '邀請你參加「古韻新生」古風音樂大賽！只要擁有 Discord 音樂創作者身分即可投稿。',
+  };
+  const text = `${messages[kind]}\n${registrationUrl}`;
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: '古韻新生｜古風音樂大賽', text, url: registrationUrl });
+      return;
+    }
+    await navigator.clipboard.writeText(text);
+    window.open('https://discord.com/channels/@me', '_blank', 'noopener');
+    showAdminToast('邀請文字已複製，可直接貼到 Discord。');
+  } catch (error) {
+    if (error?.name !== 'AbortError') showAdminToast('分享未完成，請再試一次。');
+  }
+}
+
+document.querySelector('[data-share-discord]')?.addEventListener('click', () => shareCompetition('share'));
+document.querySelector('[data-invite-creator]')?.addEventListener('click', () => shareCompetition('invite'));
+document.querySelector('[data-open-official-vote]')?.addEventListener('click', () => {
+  if (liveDataApiBaseUrl) window.location.assign(`${liveDataApiBaseUrl}/vote`);
+});
+hydratePublicCompetition();
+
+document.querySelector('[data-admin-add-work]')?.addEventListener('click', openLiveWorksManager);
 
 function initializeLiveDataControls() {
   const actionArea = document.querySelector('.admin-header > div:last-child');
@@ -166,13 +452,7 @@ function initializeLiveDataControls() {
   button.type = 'button';
   button.className = 'admin-connect-data';
   button.dataset.liveDataConnect = '';
-  button.addEventListener('click', () => {
-    if (sessionStorage.getItem(liveAdminTokenKey)) {
-      hydrateLiveAdminDashboard();
-      return;
-    }
-    requestLiveDataAuthorization();
-  });
+  button.addEventListener('click', requestLiveDataAuthorization);
   actionArea.prepend(button);
   updateLiveDataConnectButton();
 }
@@ -401,40 +681,8 @@ function renderLiveDataPlaceholder() {
 }
 
 async function hydrateLiveAdminDashboard() {
-  const token = sessionStorage.getItem(liveAdminTokenKey);
-  updateLiveDataConnectButton();
-  if (!liveDataApiBaseUrl) {
-    renderLiveDataPlaceholder();
-    setLiveDataStatus('尚未設定 Discord 資料伺服器。', 'error');
-    return false;
-  }
-  if (!token) {
-    renderLiveDataPlaceholder();
-    setLiveDataStatus('尚未連接 Discord 資料，請點選右上角「連接資料」。', 'pending');
-    return false;
-  }
-  setLiveDataStatus('正在同步 Discord 資料…', 'pending');
-  try {
-    const response = await fetch(`${liveDataApiBaseUrl}/api/moyun/admin/dashboard`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!response.ok) {
-      if (response.status === 401 || response.status === 403) sessionStorage.removeItem(liveAdminTokenKey);
-      renderLiveDataPlaceholder();
-      updateLiveDataConnectButton();
-      setLiveDataStatus('Discord 管理員授權已失效，請重新連接資料。', 'error');
-      return false;
-    }
-    const data = await response.json();
-    renderLiveDashboard(data);
-    setLiveDataStatus(`已連接 Discord 資料 · 更新於 ${formatLiveAdminDate(data.updatedAt)}`, 'connected');
-    updateLiveDataConnectButton();
-    return true;
-  } catch (error) {
-    renderLiveDataPlaceholder();
-    setLiveDataStatus('目前無法連接 Discord 資料伺服器，請稍後再試。', 'error');
-    return false;
-  }
+  openDiscordAdmin();
+  return false;
 }
 
 initializeLiveDataControls();
@@ -492,105 +740,7 @@ document.querySelectorAll('.row-link').forEach((button) => button.addEventListen
   showAdminToast('報名資料狀態已更新');
 }));
 
-const adminAuthGate = document.querySelector('.admin-auth-gate');
-const adminLoginForm = document.querySelector('#admin-login-form');
-const adminLoginEmail = document.querySelector('#admin-login-email');
-const adminLoginPassword = document.querySelector('#admin-login-password');
-const adminEmailField = document.querySelector('#admin-email-field');
-const adminLoginKicker = document.querySelector('#admin-login-kicker');
-const adminLoginTitle = document.querySelector('#admin-login-title');
-const adminLoginMessage = document.querySelector('#admin-login-message');
-const localAdminSessionKey = 'moyun-local-admin-unlocked';
-const localAdminPasswordHash = '5994471abb01112afcc18159f6cc74b4f511b99806da59b3caf5a9c173cacfc5';
-
-function configureAdminGate(useSupabase) {
-  adminEmailField.hidden = !useSupabase;
-  adminLoginEmail.disabled = !useSupabase;
-  adminLoginEmail.required = useSupabase;
-  adminLoginKicker.textContent = useSupabase ? 'ADMIN ACCESS' : 'ADMIN PASSWORD';
-  adminLoginTitle.textContent = useSupabase ? '管理員登入' : '輸入管理員密碼';
-  adminLoginPassword.placeholder = useSupabase ? '請輸入密碼' : '請輸入管理員密碼';
-  adminLoginMessage.textContent = '';
-}
-
-async function localPasswordMatches(password) {
-  const encodedPassword = new TextEncoder().encode(password);
-  const digest = await crypto.subtle.digest('SHA-256', encodedPassword);
-  const hashedPassword = Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, '0')).join('');
-  return hashedPassword === localAdminPasswordHash;
-}
-
-async function hydrateAdminDashboard() {
-  if (!window.moyunSupabase) {
-    await hydrateLiveAdminDashboard();
-    return;
-  }
-  const [{ count: total }, { count: paid }, { count: reviewing }, { count: votes }] = await Promise.all([
-    window.moyunSupabase.from('registrations').select('*', { count: 'exact', head: true }),
-    window.moyunSupabase.from('registrations').select('*', { count: 'exact', head: true }).eq('payment_status', 'paid'),
-    window.moyunSupabase.from('registrations').select('*', { count: 'exact', head: true }).eq('review_status', 'pending'),
-    window.moyunSupabase.from('votes').select('*', { count: 'exact', head: true }),
-  ]);
-  const metrics = document.querySelectorAll('.metric-grid h2');
-  [total, paid, reviewing, votes].forEach((value, index) => { if (metrics[index]) metrics[index].textContent = (value || 0).toLocaleString('zh-TW'); });
-}
-
-window.requestAdminAccess = async () => {
-  if (!window.moyunSupabase) {
-    configureAdminGate(false);
-    if (sessionStorage.getItem(localAdminSessionKey) === 'true') {
-      adminAuthGate.hidden = true;
-      await hydrateAdminDashboard();
-      return;
-    }
-    adminAuthGate.hidden = false;
-    return;
-  }
-  configureAdminGate(true);
-  const { data: { user } } = await window.moyunSupabase.auth.getUser();
-  if (!user) { adminAuthGate.hidden = false; return; }
-  const { data: profile } = await window.moyunSupabase.from('profiles').select('role').eq('id', user.id).maybeSingle();
-  if (profile?.role !== 'admin') {
-    adminAuthGate.hidden = false;
-    adminLoginMessage.textContent = '此帳號沒有管理員權限。';
-    return;
-  }
-  adminAuthGate.hidden = true;
-  await hydrateAdminDashboard();
-};
-
-if (adminLoginForm) adminLoginForm.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  if (!window.moyunSupabase) {
-    const passwordMatches = await localPasswordMatches(adminLoginPassword.value);
-    if (!passwordMatches) { adminLoginMessage.textContent = '密碼不正確，請再試一次。'; return; }
-    sessionStorage.setItem(localAdminSessionKey, 'true');
-    adminLoginPassword.value = '';
-    adminAuthGate.hidden = true;
-    await hydrateAdminDashboard();
-    showAdminToast('已進入管理後台。');
-    return;
-  }
-  adminLoginMessage.textContent = '正在登入…';
-  const { error } = await window.moyunSupabase.auth.signInWithPassword({
-    email: adminLoginEmail.value,
-    password: adminLoginPassword.value,
-  });
-  if (error) { adminLoginMessage.textContent = error.message; return; }
-  await window.requestAdminAccess();
-});
-
-document.querySelector('[data-admin-signout]')?.addEventListener('click', async () => {
-  if (window.moyunSupabase) await window.moyunSupabase.auth.signOut();
-  sessionStorage.removeItem(localAdminSessionKey);
-  sessionStorage.removeItem(liveAdminTokenKey);
-  liveAdminSnapshot = null;
-  adminAuthGate.hidden = true;
-  showView('home');
-  showAdminToast('已登出管理後台');
-});
-
-if (requestedView === 'admin') window.requestAdminAccess();
+window.requestAdminAccess = openDiscordAdmin;
 
 const spiritCards = new Map(Array.from(document.querySelectorAll('[data-spirit]')).map((card) => [card.dataset.spirit, card]));
 const spiritTimers = new Map();
@@ -631,6 +781,75 @@ const spiritInteractions = {
 };
 let spiritAudioContext;
 const spiritReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+function initializeSpiritPromptPanels() {
+  spiritCards.forEach((card, spiritId) => {
+    const copy = card.querySelector('.spirit-copy');
+    if (!copy || copy.querySelector('[data-spirit-prompt-panel]')) return;
+    const panel = document.createElement('section');
+    const header = document.createElement('div');
+    const label = document.createElement('span');
+    const copyButton = document.createElement('button');
+    const prompt = document.createElement('p');
+    const hint = document.createElement('small');
+    panel.className = 'spirit-prompt-card';
+    panel.dataset.spiritPromptPanel = spiritId;
+    panel.hidden = true;
+    label.textContent = '歌曲靈感提示詞';
+    copyButton.type = 'button';
+    copyButton.className = 'spirit-prompt-copy';
+    copyButton.textContent = '複製提示詞';
+    copyButton.dataset.spiritPromptCopy = spiritId;
+    prompt.dataset.spiritPromptText = spiritId;
+    hint.textContent = '再次點擊寵物，可更換一則新靈感。';
+    header.append(label, copyButton);
+    panel.append(header, prompt, hint);
+    copy.append(panel);
+  });
+}
+
+async function copySpiritPrompt(spiritId, button) {
+  const prompt = spiritCards.get(spiritId)?.querySelector('[data-spirit-prompt-text]')?.textContent;
+  if (!prompt) return;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(prompt);
+    } else {
+      const textarea = document.createElement('textarea');
+      textarea.value = prompt;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.append(textarea);
+      textarea.select();
+      document.execCommand('copy');
+      textarea.remove();
+    }
+    button.textContent = '已複製 ✓';
+    window.setTimeout(() => { button.textContent = '複製提示詞'; }, 1600);
+  } catch (error) {
+    button.textContent = '請長按文字複製';
+    window.setTimeout(() => { button.textContent = '複製提示詞'; }, 2200);
+  }
+}
+
+function revealSpiritPrompt(card, interaction, promptIndex) {
+  const detail = {
+    spiritId: card.dataset.spirit,
+    interactionCount: promptIndex + 1,
+  };
+  if (!window.MINGYUN_READY) {
+    window.MINGYUN_PENDING_REQUEST = detail;
+    const response = card.querySelector('.spirit-response');
+    if (response) response.textContent = '古風靈感庫載入中，稍候就會自動展開。';
+    return;
+  }
+  window.dispatchEvent(new CustomEvent('mingyun:request', { detail }));
+}
+
+initializeSpiritPromptPanels();
+document.querySelectorAll('[data-spirit-prompt-copy]').forEach((button) => {
+  button.addEventListener('click', () => copySpiritPrompt(button.dataset.spiritPromptCopy, button));
+});
 
 function playSpiritSound(interaction, isCombo = false) {
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -694,7 +913,8 @@ function triggerSpirit(spiritId) {
   card.dataset.interactionCount = String(nextInteractionCount);
   card.dataset.reaction = String(((nextInteractionCount - 1) % 3) + 1);
   const response = card.querySelector('.spirit-response');
-  if (response) response.textContent = `${interaction.messages[interactionCount % interaction.messages.length]}${isCombo ? ' 三次默契連擊成功！' : ''}`;
+  if (response) response.textContent = `${interaction.messages[interactionCount % interaction.messages.length]} 已生成歌曲靈感。${isCombo ? ' 三次默契連擊成功！' : ''}`;
+  revealSpiritPrompt(card, interaction, interactionCount);
   releaseSpiritParticles(card, interaction, isCombo);
   playSpiritSound(interaction, isCombo);
   spiritTimers.set(spiritId, window.setTimeout(() => card.classList.remove('is-playing', 'is-combo'), 1900));
