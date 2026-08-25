@@ -1,23 +1,25 @@
 (() => {
   "use strict";
 
-  // The three source artworks remain untouched underneath this transparent
-  // canvas. While paused the canvas is empty; during playback the audio's
-  // waveform lifts one soft, continuous silk-like veil over the image.
+  // Original paintings stay untouched <img> elements. No idle/baked animation.
+  // 山水設色：花青、石青、石綠、赭石、淡墨（screen approximations）。
   const palettes = {
-    "ink-resonance": ["#71c9bf", "#e7a197"],
-    "moonlit-strings": ["#aebbe7", "#d7c7df"],
-    "landscape-score": ["#82bbaa", "#ddb09f"],
+    "ink-resonance": ["#638b91", "#73927d", "#b19b76", "#385b61"],
+    "moonlit-strings": ["#355568", "#576f68", "#a18460", "#303b3b"],
+    "landscape-score": ["#436b67", "#718b6a", "#9b7952", "#344a50"],
   };
+  // Overlapping washes in negative space, clear of the moon and foreground.
   const compositions = {
-    "ink-resonance": { center: 0.54, slope: -0.035, thickness: 0.085, amplitude: 0.1, echo: 0.11 },
-    "moonlit-strings": { center: 0.51, slope: 0.075, thickness: 0.072, amplitude: 0.082, echo: -0.105 },
-    "landscape-score": { center: 0.56, slope: -0.055, thickness: 0.078, amplitude: 0.088, echo: 0.095 },
+    "ink-resonance": [[.43, .49, .25, .83], [.57, .54, .22, .94], [.52, .64, .14, .71], [.39, .58, .16, .69]],
+    "moonlit-strings": [[.42, .44, .23, .69], [.58, .48, .20, .79], [.52, .57, .14, .62], [.35, .50, .14, .74]],
+    "landscape-score": [[.40, .49, .23, .68], [.56, .52, .22, .78], [.61, .59, .13, .67], [.35, .56, .15, .71]],
   };
   const states = [];
+  const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
   let audioContext;
   let activeState;
   let frameRequest;
+  let activation = 0;
 
   const average = (values, start, end) => {
     let total = 0;
@@ -26,9 +28,10 @@
     return upper > start ? total / ((upper - start) * 255) : 0;
   };
 
-  const band = (spectrum, index, spread = 2) => {
-    const start = Math.min(spectrum.length - 1, Math.max(0, index - spread));
-    return average(spectrum, start, start + spread * 2 + 1);
+  const rms = (waveform) => {
+    let squares = 0;
+    for (const sample of waveform) squares += ((sample - 128) / 128) ** 2;
+    return Math.sqrt(squares / waveform.length);
   };
 
   const fit = (state) => {
@@ -37,151 +40,129 @@
     const width = Math.max(1, Math.round(bounds.width));
     const height = Math.max(1, Math.round(bounds.height));
     if (width === state.width && height === state.height && ratio === state.ratio) return;
-    state.width = width;
-    state.height = height;
-    state.ratio = ratio;
+    Object.assign(state, { width, height, ratio });
     state.canvas.width = width * ratio;
     state.canvas.height = height * ratio;
   };
 
   const clear = (state) => {
     fit(state);
-    const { context, ratio, width, height } = state;
-    context.setTransform(ratio, 0, 0, ratio, 0, 0);
-    context.clearRect(0, 0, width, height);
-    return { context, width, height };
+    state.context.setTransform(state.ratio, 0, 0, state.ratio, 0, 0);
+    state.context.clearRect(0, 0, state.width, state.height);
   };
 
-  const level = (state, spectrum, slot, index, spread = 2) => {
-    const next = band(spectrum, index, spread);
-    const previous = state.levels[slot] ?? next;
-    const smoothed = previous * 0.82 + next * 0.18;
-    state.levels[slot] = smoothed;
-    return smoothed;
-  };
-
-  const waveformAt = (waveform, progress) => {
-    const center = Math.round(progress * (waveform.length - 1));
-    let total = 0;
-    let count = 0;
-    for (let offset = -2; offset <= 2; offset += 1) {
-      const index = Math.max(0, Math.min(waveform.length - 1, center + offset));
-      total += (waveform[index] - 128) / 128;
-      count += 1;
-    }
-    return total / count;
+  const reset = (state) => {
+    state.energy = 0;
+    state.wetness = 0;
+    state.lastTime = undefined;
+    clear(state);
   };
 
   const rgba = (hex, alpha) => {
-    const value = hex.slice(1);
-    const red = Number.parseInt(value.slice(0, 2), 16);
-    const green = Number.parseInt(value.slice(2, 4), 16);
-    const blue = Number.parseInt(value.slice(4, 6), 16);
-    return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+    const value = Number.parseInt(hex.slice(1), 16);
+    return `rgba(${value >> 16}, ${(value >> 8) & 255}, ${value & 255}, ${alpha})`;
   };
 
-  const smoothPath = (context, points, move = true) => {
-    const first = points[0];
-    if (move) context.moveTo(first.x, first.y);
-    else context.lineTo(first.x, first.y);
-    for (let index = 1; index < points.length - 1; index += 1) {
-      const current = points[index];
-      const next = points[index + 1];
-      context.quadraticCurveTo(current.x, current.y, (current.x + next.x) * 0.5, (current.y + next.y) * 0.5);
-    }
-    const last = points[points.length - 1];
-    context.lineTo(last.x, last.y);
+  const randomFor = (seed) => () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
   };
 
-  const fillSilkBand = (context, geometry, colors, alpha) => {
-    const gradient = context.createLinearGradient(0, 0, geometry.width, geometry.height);
-    gradient.addColorStop(0, rgba(colors[0], 0));
-    gradient.addColorStop(0.24, rgba(colors[0], 0.72));
-    gradient.addColorStop(0.58, rgba(colors[1], 0.68));
-    gradient.addColorStop(1, rgba(colors[1], 0));
-    context.save();
-    context.globalAlpha = alpha;
-    context.globalCompositeOperation = "screen";
+  // Feathered pigment stamps are cached once per active card. Displaced nested
+  // contours create wet-paper edges and dense interiors without per-frame noise.
+  const createPigmentStamp = (color, seed) => {
+    const stamp = document.createElement("canvas");
+    stamp.width = stamp.height = 256;
+    const context = stamp.getContext("2d");
+    const random = randomFor(seed);
+    const phases = Array.from({ length: 5 }, () => random() * Math.PI * 2);
+    const gradient = context.createRadialGradient(115, 131, 5, 128, 128, 116);
+    gradient.addColorStop(0, rgba(color, .9));
+    gradient.addColorStop(.54, rgba(color, .72));
+    gradient.addColorStop(.84, rgba(color, .34));
+    gradient.addColorStop(1, rgba(color, 0));
     context.fillStyle = gradient;
-    context.shadowColor = rgba(colors[0], 0.3);
-    context.shadowBlur = Math.max(8, geometry.height * 0.045);
-    context.beginPath();
-    smoothPath(context, geometry.upper);
-    const lower = [...geometry.lower].reverse();
-    smoothPath(context, lower, false);
-    context.closePath();
-    context.fill();
-    context.restore();
-  };
-
-  const silkGeometry = (state, waveform, options) => {
-    const { width, height } = state;
-    const upper = [];
-    const lower = [];
-    const samples = 34;
-    for (let index = 0; index <= samples; index += 1) {
-      const progress = index / samples;
-      const waveformLift = waveformAt(waveform, progress) * options.amplitude;
-      const slowLift = Math.sin(progress * Math.PI * 2 + options.phase) * options.drift;
-      const center = height * (
-        options.center
-        + options.slope * (progress - 0.5)
-        + waveformLift
-        + slowLift
-      );
-      const taper = 0.34 + Math.sin(progress * Math.PI) * 0.66;
-      const half = height * options.thickness * taper;
-      upper.push({ x: width * progress, y: center - half });
-      lower.push({ x: width * progress, y: center + half });
+    context.shadowColor = rgba(color, .24);
+    context.shadowBlur = 3;
+    for (let layer = 0; layer < 30; layer += 1) {
+      const scale = 1 - layer * .018;
+      const points = [];
+      for (let index = 0; index < 96; index += 1) {
+        const angle = index / 96 * Math.PI * 2;
+        const edge = 1 + .15 * Math.sin(angle * 3 + phases[0])
+          + .12 * Math.cos(angle * 5 + phases[1])
+          + .065 * Math.sin(angle * 9 + phases[2])
+          + .035 * Math.cos(angle * 17 + phases[3])
+          + (random() - .5) * .065;
+        const radius = 82 * scale * edge;
+        points.push({ x: 128 + Math.cos(angle) * radius + Math.sin(layer * .7) * 3,
+          y: 128 + Math.sin(angle) * radius + Math.cos(layer * .5) * 3 });
+      }
+      context.globalAlpha = .026 + layer * .0011;
+      context.beginPath();
+      const last = points[points.length - 1];
+      context.moveTo((last.x + points[0].x) / 2, (last.y + points[0].y) / 2);
+      points.forEach((point, index) => {
+        const next = points[(index + 1) % points.length];
+        context.quadraticCurveTo(point.x, point.y, (point.x + next.x) / 2, (point.y + next.y) / 2);
+      });
+      context.closePath();
+      context.fill();
     }
-    return { width, height, upper, lower };
+    return stamp;
   };
 
-  const drawSoundVeil = (state, spectrum, waveform) => {
-    const { context } = clear(state);
-    const bass = level(state, spectrum, 0, 7, 5);
-    const mid = level(state, spectrum, 1, 34, 9);
-    const treble = level(state, spectrum, 2, 78, 12);
-    const activity = Math.min(1, Math.max(0, (bass * 0.48 + mid * 0.38 + treble * 0.14 - 0.018) * 3.1));
-    if (activity < 0.018) return;
-
-    const colors = palettes[state.artwork] || palettes["ink-resonance"];
+  const drawInkBloom = (state) => {
+    clear(state);
+    const amplitude = rms(state.waveform);
+    // Smoothed frequency bins must never create fake movement during silence.
+    if (amplitude < .003 || state.audio.muted || state.audio.volume === 0) {
+      state.energy = 0;
+      state.lastTime = state.audio.currentTime;
+      return;
+    }
+    const now = state.audio.currentTime;
+    const delta = Math.max(0, Math.min(.05, now - (state.lastTime ?? now)));
+    state.lastTime = now;
+    const signal = Math.min(1, amplitude * state.audio.volume * 7);
+    const follow = 1 - Math.exp(-delta * (signal > state.energy ? 9 : 3));
+    state.energy += (signal - state.energy) * follow;
+    // Diffusion advances only with integrated sound energy, not wall-clock time.
+    state.wetness += delta * state.energy * .36;
+    const bass = average(state.spectrum, 1, 7);
+    const mid = average(state.spectrum, 7, 32);
+    const high = average(state.spectrum, 32, 100);
+    const bands = [bass, mid, high, (bass + mid) * .5];
     const composition = compositions[state.artwork] || compositions["ink-resonance"];
-    const phase = state.audio.currentTime * (0.72 + treble * 0.5);
-    const primary = silkGeometry(state, waveform, {
-      center: composition.center,
-      slope: composition.slope,
-      thickness: composition.thickness * (0.72 + bass * 0.58),
-      amplitude: composition.amplitude * (0.38 + mid * 1.25),
-      drift: activity * 0.012,
-      phase,
+    const movement = reducedMotion?.matches ? 0 : 1;
+    const { context, width, height } = state;
+    context.globalCompositeOperation = "source-over";
+    composition.forEach(([x, y, radius, aspect], index) => {
+      const response = bands[index];
+      const diffusion = Math.sin(state.wetness + index * .9) * .06 * movement;
+      const size = width * radius * 2 * (.76 + state.energy * .32 + response * .12 + diffusion);
+      const shift = Math.sin(state.wetness * .65 + index) * width * .012 * movement;
+      const pigmentStrength = [.94, .72, .28, .58][index];
+      context.globalAlpha = Math.min(.88, state.energy * pigmentStrength);
+      context.drawImage(state.stamps[index], width * x - size / 2 + shift,
+        height * y - size * aspect / 2, size, size * aspect);
     });
-    fillSilkBand(context, primary, colors, 0.055 + activity * 0.16);
-
-    const echo = silkGeometry(state, waveform, {
-      center: composition.center + composition.echo,
-      slope: -composition.slope * 0.65,
-      thickness: composition.thickness * (0.34 + treble * 0.28),
-      amplitude: composition.amplitude * (0.16 + treble * 0.45),
-      drift: activity * 0.008,
-      phase: phase + 1.8,
-    });
-    fillSilkBand(context, echo, [colors[1], colors[0]], 0.025 + activity * 0.07);
+    context.globalAlpha = 1;
   };
 
   const stopFrame = () => {
-    if (frameRequest) cancelAnimationFrame(frameRequest);
+    if (frameRequest !== undefined) cancelAnimationFrame(frameRequest);
     frameRequest = undefined;
   };
 
   const render = () => {
-    if (!activeState || activeState.audio.paused || activeState.audio.ended) {
+    if (!activeState || activeState.audio.paused || activeState.audio.ended || document.hidden) {
       stopFrame();
       return;
     }
     activeState.analyser.getByteFrequencyData(activeState.spectrum);
     activeState.analyser.getByteTimeDomainData(activeState.waveform);
-    drawSoundVeil(activeState, activeState.spectrum, activeState.waveform);
+    drawInkBloom(activeState);
     frameRequest = requestAnimationFrame(render);
   };
 
@@ -189,52 +170,68 @@
     if (!window.AudioContext && !window.webkitAudioContext) return false;
     if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
     if (state.analyser) return true;
-    state.analyser = audioContext.createAnalyser();
-    state.analyser.fftSize = 256;
-    state.analyser.smoothingTimeConstant = 0.82;
-    state.spectrum = new Uint8Array(state.analyser.frequencyBinCount);
-    state.waveform = new Uint8Array(state.analyser.fftSize);
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 1024;
+    analyser.smoothingTimeConstant = .74;
     const source = audioContext.createMediaElementSource(state.audio);
-    source.connect(state.analyser);
-    state.analyser.connect(audioContext.destination);
+    source.connect(analyser);
+    analyser.connect(audioContext.destination);
+    state.analyser = analyser;
+    state.spectrum = new Uint8Array(analyser.frequencyBinCount);
+    state.waveform = new Uint8Array(analyser.fftSize);
+    const colors = palettes[state.artwork] || palettes["ink-resonance"];
+    state.stamps = colors.map((color, index) => createPigmentStamp(color, 827 + index * 173));
     return true;
   };
 
   const activate = async (state) => {
-    states.forEach((otherState) => {
-      if (otherState === state) return;
-      otherState.audio.pause();
-      clear(otherState);
+    const ticket = ++activation;
+    states.forEach((other) => {
+      if (other === state) return;
+      other.audio.pause();
+      reset(other);
     });
-    if (!connect(state)) return;
     try {
+      if (!connect(state)) return;
       await audioContext.resume();
     } catch (_) {
-      return;
+      return; // Keep native controls usable when visualisation is unavailable.
     }
+    if (ticket !== activation || state.audio.paused || state.audio.ended) return;
     activeState = state;
+    state.lastTime = undefined;
     stopFrame();
     render();
   };
 
   const attach = (canvas) => {
-    const card = canvas.closest(".work");
-    const audio = card?.querySelector("audio");
+    const audio = canvas.closest(".work")?.querySelector("audio");
     const context = canvas.getContext("2d");
     if (!audio || !context) return;
-    const state = { canvas, audio, context, artwork: canvas.dataset.artwork, levels: [] };
+    const state = { canvas, audio, context, artwork: canvas.dataset.artwork, energy: 0, wetness: 0 };
     states.push(state);
     clear(state);
     audio.addEventListener("play", () => { void activate(state); });
-    audio.addEventListener("pause", () => {
-      if (activeState === state) activeState = undefined;
-      stopFrame();
-      clear(state);
+    const deactivate = () => {
+      if (activeState === state) {
+        activeState = undefined;
+        stopFrame();
+      }
+      reset(state);
+    };
+    audio.addEventListener("pause", deactivate);
+    audio.addEventListener("ended", deactivate);
+    audio.addEventListener("seeking", () => reset(state));
+    audio.addEventListener("volumechange", () => {
+      if (audio.muted || audio.volume === 0) reset(state);
     });
-    audio.addEventListener("ended", () => clear(state));
     if (window.ResizeObserver) new ResizeObserver(() => clear(state)).observe(canvas);
     else window.addEventListener("resize", () => clear(state));
   };
 
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) { stopFrame(); states.forEach(clear); }
+    else if (activeState && !activeState.audio.paused) { stopFrame(); render(); }
+  });
   document.querySelectorAll(".anonymous-visualizer").forEach(attach);
 })();

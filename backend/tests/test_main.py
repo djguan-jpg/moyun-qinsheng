@@ -385,7 +385,7 @@ def test_public_gallery_plays_uploaded_audio_without_exposing_discord_identity(t
     assert "一段公開的旋律。" not in gallery.text
     assert "/guyun/media/sample.mp3" in gallery.text
     assert '<img src="/guyun/art/ink-resonance?v=canvas-artwork-20260825-v3" alt=""><canvas class="anonymous-visualizer" data-artwork="ink-resonance"></canvas>' in gallery.text
-    assert '/guyun/anonymous-visualizer.js?v=silk-20260826' in gallery.text
+    assert '/guyun/anonymous-visualizer.js?v=shanshui-ink-20260826' in gallery.text
     assert '<video' not in gallery.text
     assert "@keyframes anonymous-art" not in gallery.text
     assert "animation:anonymous-art" not in gallery.text
@@ -402,7 +402,9 @@ def test_public_gallery_plays_uploaded_audio_without_exposing_discord_identity(t
     assert "getByteFrequencyData" in visualizer.text
     assert "getByteTimeDomainData" in visualizer.text
     assert "requestAnimationFrame" in visualizer.text
-    assert "fillSilkBand" in visualizer.text
+    assert "drawInkBloom" in visualizer.text
+    assert "createPigmentStamp" in visualizer.text
+    assert "fillSilkBand" not in visualizer.text
     assert "fillFacet" not in visualizer.text
     assert "drawFoldingWindows" not in visualizer.text
     assert "gilded" not in visualizer.text
