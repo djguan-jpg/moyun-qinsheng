@@ -31,11 +31,7 @@ ALLOWED_AUDIO_TYPES = {
     ".ogg": {"audio/ogg", "application/ogg", "application/octet-stream"},
     ".webm": {"audio/webm", "application/octet-stream"},
 }
-ANONYMOUS_ARTWORKS = {
-    "ink-resonance": "ink-resonance.mp4",
-    "moonlit-strings": "moonlit-strings.mp4",
-    "landscape-score": "landscape-score.mp4",
-}
+ANONYMOUS_ARTWORK_KEYS = ("ink-resonance", "moonlit-strings", "landscape-score")
 
 # Docker Compose injects these values itself.  Local development reads backend/.env.
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
@@ -222,7 +218,7 @@ def page(title: str, body: str, *, status_code: int = 200) -> HTMLResponse:
 <title>{html.escape(title)}｜古韻新生</title>
 <style>
   .anonymous-art {{ height:190px; overflow:hidden; margin:-20px -20px 18px; background:#1c312a; }}
-  .anonymous-art video {{ display:block; width:100%; height:100%; object-fit:cover; }}
+  .anonymous-art canvas {{ display:block; width:100%; height:100%; }}
   :root {{ color-scheme: light; font-family: "Noto Serif TC", "Microsoft JhengHei", serif; color: #19302c; background:#f5f2e9; }}
   body {{ margin:0; min-height:100vh; display:grid; place-items:center; background:radial-gradient(circle at top right,#d9e3dc,transparent 38%),#f5f2e9; }}
   main {{ width:min(680px,calc(100% - 40px)); margin:40px 20px; padding:36px; background:#fffdf8; border:1px solid #d8d1c3; box-shadow:0 16px 45px #23362a20; }}
@@ -233,34 +229,7 @@ def page(title: str, body: str, *, status_code: int = 200) -> HTMLResponse:
   .muted {{ color:#66736e; font-size:.92rem; }} .logout {{ margin-top:24px; background:transparent; color:#234d45; padding:0; text-decoration:underline; }}
   .gallery,.admin {{ width:min(1060px,calc(100% - 40px)); }} .gallery-grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:18px; margin-top:24px; }} .work {{ padding:20px; border:1px solid #d8d1c3; background:#fff; }} .work h2 {{ margin:.3rem 0 .8rem; font-size:1.2rem; }} audio {{ width:100%; }}
   .admin-stats {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin:24px 0; }} .admin-stats article {{ padding:18px; background:#f3f6f1; border:1px solid #d8d1c3; }} .admin-stats p,.admin-stats h2 {{ margin:.15rem 0; }} table {{ width:100%; border-collapse:collapse; margin-top:16px; }} th,td {{ padding:12px 8px; border-bottom:1px solid #ded8cb; text-align:left; vertical-align:top; }} th {{ color:#66736e; font-size:.82rem; }}
-</style></head><body><main>{body}</main><script>
-(() => {{
-  const cards = Array.from(document.querySelectorAll(".work"));
-  const stopArtwork = (card, reset = false) => {{
-    const artwork = card.querySelector(".anonymous-art video");
-    if (!artwork) return;
-    artwork.pause();
-    if (reset) artwork.currentTime = 0;
-  }};
-
-  cards.forEach((card) => {{
-    const audio = card.querySelector("audio");
-    const artwork = card.querySelector(".anonymous-art video");
-    if (!audio || !artwork) return;
-
-    audio.addEventListener("play", () => {{
-      cards.forEach((otherCard) => {{
-        if (otherCard === card) return;
-        otherCard.querySelector("audio")?.pause();
-        stopArtwork(otherCard, true);
-      }});
-      artwork.play().catch(() => {{}});
-    }});
-    audio.addEventListener("pause", () => stopArtwork(card));
-    audio.addEventListener("ended", () => stopArtwork(card, true));
-  }});
-}})();
-</script></body></html>"""
+</style></head><body><main>{body}</main></body></html>"""
     return HTMLResponse(document, status_code=status_code)
 
 
@@ -364,16 +333,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         def render_work_card(work: sqlite3.Row) -> str:
             audio_source = public_path(settings, "/media/" + work["audio_filename"])
             audio_type = html.escape(work["audio_content_type"] or "audio/mpeg")
-            artwork_keys = tuple(ANONYMOUS_ARTWORKS)
-            artwork_key = artwork_keys[(work["id"] - 1) % len(artwork_keys)]
-            artwork_url = public_path(settings, "/art/" + artwork_key)
+            artwork_key = ANONYMOUS_ARTWORK_KEYS[(work["id"] - 1) % len(ANONYMOUS_ARTWORK_KEYS)]
             if settings.public_reveal_work_metadata:
                 metadata = f"""<p class="eyebrow">匿名作品 #{work['id']:03d}・{html.escape(work['category'])}</p>
 <h2>{html.escape(work['work_title'])}</h2><p class="muted">{html.escape(work['description'])}</p>"""
             else:
                 metadata = f"""<p class="eyebrow">ANONYMOUS ENTRY</p>
 <h2>匿名作品 #{work['id']:03d}</h2><p class="muted">歌名與創作理念將於主辦單位公告後統一公開。</p>"""
-            return f"""<article class="work"><div class="anonymous-art" aria-hidden="true"><video muted loop playsinline preload="metadata"><source src="{artwork_url}" type="video/mp4"></video></div>{metadata}
+            return f"""<article class="work"><div class="anonymous-art" aria-hidden="true"><canvas class="anonymous-visualizer" data-artwork="{artwork_key}"></canvas></div>{metadata}
 <audio controls preload="metadata"><source src="{audio_source}" type="{audio_type}">你的瀏覽器不支援音檔播放。</audio></article>"""
 
         cards = "".join(
@@ -386,7 +353,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         body = f"""
 <p class="eyebrow">PUBLIC LISTENING GALLERY</p><h1>公開作品展演</h1>
-<p>{gallery_description}</p><div class="gallery-grid">{cards}</div>"""
+<p>{gallery_description}</p><div class="gallery-grid">{cards}</div>
+<script src="{public_path(settings, '/anonymous-visualizer.js')}" defer></script>"""
         return page("公開作品展演", body)
 
     @app.get("/media/{audio_filename}")
@@ -399,15 +367,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         media_type, _ = mimetypes.guess_type(path.name)
         return FileResponse(path, media_type=media_type or "application/octet-stream")
 
-    @app.get("/art/{artwork}")
-    async def stream_anonymous_artwork(artwork: str) -> FileResponse:
-        filename = ANONYMOUS_ARTWORKS.get(artwork)
-        if not filename:
-            raise HTTPException(status_code=404, detail="找不到匿名作品圖案。")
-        path = Path(__file__).resolve().parent / "static" / "anonymous-art" / filename
+    @app.get("/anonymous-visualizer.js")
+    async def stream_anonymous_visualizer() -> FileResponse:
+        path = Path(__file__).resolve().parent / "static" / "anonymous-visualizer.js"
         if not path.is_file():
-            raise HTTPException(status_code=404, detail="找不到匿名作品圖案。")
-        return FileResponse(path, media_type="video/mp4", headers={"Cache-Control": "public, max-age=86400"})
+            raise HTTPException(status_code=404, detail="找不到匿名作品播放器。")
+        return FileResponse(path, media_type="application/javascript", headers={"Cache-Control": "no-cache"})
 
     @app.get("/auth/login")
     async def login(request: Request, next: str = ""):
