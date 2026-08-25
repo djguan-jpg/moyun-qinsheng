@@ -371,7 +371,10 @@ def test_public_gallery_plays_uploaded_audio_without_exposing_discord_identity(t
             )
         gallery = client.get("/works")
         media = client.get("/media/sample.mp3")
-        artwork = client.get("/art/ink-resonance")
+        artworks = [
+            client.get(f"/art/{artwork_key}")
+            for artwork_key in ("ink-resonance", "moonlit-strings", "landscape-score")
+        ]
         missing_artwork = client.get("/art/not-a-real-artwork")
 
     assert gallery.status_code == 200
@@ -381,13 +384,16 @@ def test_public_gallery_plays_uploaded_audio_without_exposing_discord_identity(t
     assert "一段公開的旋律。" not in gallery.text
     assert "/guyun/media/sample.mp3" in gallery.text
     assert "/guyun/art/ink-resonance" in gallery.text
-    assert "anonymous-art--ink-resonance" in gallery.text
+    assert '<video autoplay muted loop playsinline preload="metadata">' in gallery.text
+    assert '<source src="/guyun/art/ink-resonance" type="video/mp4">' in gallery.text
+    assert "@keyframes anonymous-art" not in gallery.text
+    assert "animation:anonymous-art" not in gallery.text
     assert "private-username" not in gallery.text
     assert "私人顯示名稱" not in gallery.text
     assert media.status_code == 200
     assert media.content == b"fake-mp3-data"
-    assert artwork.status_code == 200
-    assert artwork.headers["content-type"] == "image/png"
+    assert all(artwork.status_code == 200 for artwork in artworks)
+    assert all(artwork.headers["content-type"] == "video/mp4" for artwork in artworks)
     assert missing_artwork.status_code == 404
 
 

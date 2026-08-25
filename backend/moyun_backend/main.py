@@ -32,9 +32,9 @@ ALLOWED_AUDIO_TYPES = {
     ".webm": {"audio/webm", "application/octet-stream"},
 }
 ANONYMOUS_ARTWORKS = {
-    "ink-resonance": "ink-resonance.png",
-    "moonlit-strings": "moonlit-strings.png",
-    "landscape-score": "landscape-score.png",
+    "ink-resonance": "ink-resonance.mp4",
+    "moonlit-strings": "moonlit-strings.mp4",
+    "landscape-score": "landscape-score.mp4",
 }
 
 # Docker Compose injects these values itself.  Local development reads backend/.env.
@@ -221,20 +221,8 @@ def page(title: str, body: str, *, status_code: int = 200) -> HTMLResponse:
 <html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(title)}｜古韻新生</title>
 <style>
-  .anonymous-art {{ position:relative; isolation:isolate; height:190px; overflow:hidden; margin:-20px -20px 18px; background-color:#1c312a; background-position:center; background-repeat:no-repeat; background-size:108%; animation:anonymous-art-drift 13s ease-in-out infinite alternate; }}
-  .anonymous-art::before,.anonymous-art::after {{ content:""; position:absolute; pointer-events:none; z-index:1; }}
-  .anonymous-art--ink-resonance::before {{ inset:25% 31%; border:1px solid #e8c984aa; border-radius:50%; box-shadow:0 0 0 18px #e8c98420,0 0 0 42px #e8c98413; animation:anonymous-art-ripple 4.8s ease-out infinite; }}
-  .anonymous-art--ink-resonance::after {{ inset:0; background:radial-gradient(circle at 50% 56%,transparent 0 21%,#f0d9991c 22% 23%,transparent 24% 35%,#f0d99912 36% 37%,transparent 38%); animation:anonymous-art-breathe 5.4s ease-in-out infinite; }}
-  .anonymous-art--moonlit-strings::before {{ inset:0 -28%; background:linear-gradient(107deg,transparent 39%,#f1d58d00 45%,#f1d58da6 50%,#f1d58d00 55%,transparent 61%); transform:translateX(-34%); animation:anonymous-art-glint 5.8s ease-in-out infinite; }}
-  .anonymous-art--moonlit-strings::after {{ inset:0; background:linear-gradient(180deg,#fff9de12,transparent 46%,#071b170d); animation:anonymous-art-breathe 6s ease-in-out infinite reverse; }}
-  .anonymous-art--landscape-score::before {{ left:-35%; right:100%; top:42%; height:2px; background:#e7c675; box-shadow:0 -14px #e7c67555,0 14px #e7c67555; animation:anonymous-art-score-scan 6.4s ease-in-out infinite; }}
-  .anonymous-art--landscape-score::after {{ inset:0; background:linear-gradient(90deg,transparent 0 31%,#f0d89018 47%,transparent 64%); transform:translateX(-30%); animation:anonymous-art-glint 7.2s ease-in-out infinite 1.1s; }}
-  @keyframes anonymous-art-drift {{ from {{ background-size:106%; background-position:48% 52%; }} to {{ background-size:114%; background-position:53% 47%; }} }}
-  @keyframes anonymous-art-ripple {{ 0% {{ transform:scale(.7); opacity:0; }} 20% {{ opacity:.8; }} 100% {{ transform:scale(2.15); opacity:0; }} }}
-  @keyframes anonymous-art-breathe {{ 0%,100% {{ opacity:.32; }} 50% {{ opacity:.86; }} }}
-  @keyframes anonymous-art-glint {{ 0%,24% {{ transform:translateX(-42%); opacity:0; }} 38% {{ opacity:.88; }} 66% {{ transform:translateX(42%); opacity:.18; }} 100% {{ transform:translateX(42%); opacity:0; }} }}
-  @keyframes anonymous-art-score-scan {{ 0%,16% {{ left:-35%; right:100%; opacity:0; }} 28% {{ opacity:.9; }} 72% {{ left:35%; right:-35%; opacity:.55; }} 100% {{ left:35%; right:-35%; opacity:0; }} }}
-  @media (prefers-reduced-motion: reduce) {{ .anonymous-art,.anonymous-art::before,.anonymous-art::after {{ animation:none!important; }} }}
+  .anonymous-art {{ height:190px; overflow:hidden; margin:-20px -20px 18px; background:#1c312a; }}
+  .anonymous-art video {{ display:block; width:100%; height:100%; object-fit:cover; }}
   :root {{ color-scheme: light; font-family: "Noto Serif TC", "Microsoft JhengHei", serif; color: #19302c; background:#f5f2e9; }}
   body {{ margin:0; min-height:100vh; display:grid; place-items:center; background:radial-gradient(circle at top right,#d9e3dc,transparent 38%),#f5f2e9; }}
   main {{ width:min(680px,calc(100% - 40px)); margin:40px 20px; padding:36px; background:#fffdf8; border:1px solid #d8d1c3; box-shadow:0 16px 45px #23362a20; }}
@@ -358,7 +346,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             else:
                 metadata = f"""<p class="eyebrow">ANONYMOUS ENTRY</p>
 <h2>匿名作品 #{work['id']:03d}</h2><p class="muted">歌名與創作理念將於主辦單位公告後統一公開。</p>"""
-            return f"""<article class="work"><div class="anonymous-art anonymous-art--{artwork_key}" style="background-image:url('{artwork_url}')" aria-hidden="true"></div>{metadata}
+            return f"""<article class="work"><div class="anonymous-art" aria-hidden="true"><video autoplay muted loop playsinline preload="metadata"><source src="{artwork_url}" type="video/mp4"></video></div>{metadata}
 <audio controls preload="metadata"><source src="{audio_source}" type="{audio_type}">你的瀏覽器不支援音檔播放。</audio></article>"""
 
         cards = "".join(
@@ -392,7 +380,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         path = Path(__file__).resolve().parent / "static" / "anonymous-art" / filename
         if not path.is_file():
             raise HTTPException(status_code=404, detail="找不到匿名作品圖案。")
-        return FileResponse(path, media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
+        return FileResponse(path, media_type="video/mp4", headers={"Cache-Control": "public, max-age=86400"})
 
     @app.get("/auth/login")
     async def login(request: Request, next: str = ""):
