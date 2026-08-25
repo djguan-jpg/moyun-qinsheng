@@ -373,7 +373,10 @@ def test_public_gallery_plays_uploaded_audio_without_exposing_discord_identity(t
         media = client.get("/media/sample.mp3")
 
     assert gallery.status_code == 200
-    assert "月下長安" in gallery.text
+    assert "匿名作品 #001" in gallery.text
+    assert "歌名與創作理念將於主辦單位公告後統一公開。" in gallery.text
+    assert "月下長安" not in gallery.text
+    assert "一段公開的旋律。" not in gallery.text
     assert "/guyun/media/sample.mp3" in gallery.text
     assert "private-username" not in gallery.text
     assert "私人顯示名稱" not in gallery.text

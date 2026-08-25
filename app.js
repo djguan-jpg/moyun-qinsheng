@@ -240,10 +240,10 @@ function createPublicWorkCard(work, index) {
   artworkLabel.className = 'play';
   artworkLabel.textContent = String(index + 1).padStart(2, '0');
   artwork.append(artworkLabel);
-  category.textContent = work.hasLyrics ? '古風音樂 · 含匿名歌詞' : '古風音樂 · 匿名展演';
-  title.textContent = work.code || `匿名作品 ${String(index + 1).padStart(2, '0')}`;
+  category.textContent = '匿名作品 · 即時播放';
+  title.textContent = `匿名作品 #${String(index + 1).padStart(3, '0')}`;
   description.className = 'work-description';
-  description.textContent = '作品資料將於投票結束後由主辦單位統一公開。';
+  description.textContent = '歌名與創作理念將於主辦單位公告後統一公開。';
   player.className = 'work-player';
   playButton.type = 'button';
   playButton.className = 'work-play-toggle';

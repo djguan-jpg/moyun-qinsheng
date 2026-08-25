@@ -49,6 +49,7 @@ class Settings:
     registration_start_at: datetime | None
     registration_end_at: datetime | None
     public_base_path: str
+    public_reveal_work_metadata: bool = False
     admin_user_ids: frozenset[str] = frozenset()
     admin_role_ids: frozenset[str] = frozenset()
 
@@ -81,6 +82,8 @@ def load_settings() -> Settings:
         registration_start_at=parse_datetime(os.getenv("REGISTRATION_START_AT", "")),
         registration_end_at=parse_datetime(os.getenv("REGISTRATION_END_AT", "")),
         public_base_path=normalise_base_path(os.getenv("PUBLIC_BASE_PATH", "")),
+        public_reveal_work_metadata=os.getenv("PUBLIC_REVEAL_WORK_METADATA", "").strip().lower()
+        in {"1", "true", "yes"},
         admin_user_ids=frozenset(
             value.strip()
             for value in os.getenv("DISCORD_ADMIN_USER_IDS", "").split(",")
@@ -307,10 +310,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/works")
     async def public_works() -> HTMLResponse:
+        metadata_columns = ", work_title, category, description" if settings.public_reveal_work_metadata else ""
         with open_database(settings.database_path) as connection:
             works = connection.execute(
-                """
-                SELECT id, work_title, category, description, audio_filename, audio_content_type, created_at
+                f"""
+                SELECT id, audio_filename, audio_content_type, created_at{metadata_columns}
                 FROM registrations
                 WHERE audio_filename IS NOT NULL AND is_test = 0
                 ORDER BY id DESC
@@ -322,15 +326,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 {notice("目前尚無公開作品；首件完成投稿的作品將會出現在這裡。")}
 <a class="button" href="{public_path(settings, '/')}">回到報名入口</a>"""
             return page("公開作品展演", body)
+
+        def render_work_card(work: sqlite3.Row) -> str:
+            audio_source = public_path(settings, "/media/" + work["audio_filename"])
+            audio_type = html.escape(work["audio_content_type"] or "audio/mpeg")
+            if settings.public_reveal_work_metadata:
+                metadata = f"""<p class="eyebrow">匿名作品 #{work['id']:03d}・{html.escape(work['category'])}</p>
+<h2>{html.escape(work['work_title'])}</h2><p class="muted">{html.escape(work['description'])}</p>"""
+            else:
+                metadata = f"""<p class="eyebrow">ANONYMOUS ENTRY</p>
+<h2>匿名作品 #{work['id']:03d}</h2><p class="muted">歌名與創作理念將於主辦單位公告後統一公開。</p>"""
+            return f"""<article class="work">{metadata}
+<audio controls preload="metadata"><source src="{audio_source}" type="{audio_type}">你的瀏覽器不支援音檔播放。</audio></article>"""
+
         cards = "".join(
-            f"""<article class="work"><p class="eyebrow">匿名作品 #{work['id']:03d}・{html.escape(work['category'])}</p>
-<h2>{html.escape(work['work_title'])}</h2><p class="muted">{html.escape(work['description'])}</p>
-<audio controls preload="metadata"><source src="{public_path(settings, '/media/' + work['audio_filename'])}" type="{html.escape(work['audio_content_type'] or 'audio/mpeg')}">你的瀏覽器不支援音檔播放。</audio></article>"""
-            for work in works
+            render_work_card(work) for work in works
+        )
+        gallery_description = (
+            "以下作品已由創作者投稿；創作者 Discord 身分不會公開。"
+            if settings.public_reveal_work_metadata
+            else "以下作品均以匿名編號呈現，可直接播放音檔；歌名與創作理念將於主辦單位公告後統一公開。"
         )
         body = f"""
 <p class="eyebrow">PUBLIC LISTENING GALLERY</p><h1>公開作品展演</h1>
-<p>以下作品已由創作者投稿；創作者 Discord 身分不會公開。</p><div class="gallery-grid">{cards}</div>"""
+<p>{gallery_description}</p><div class="gallery-grid">{cards}</div>"""
         return page("公開作品展演", body)
 
     @app.get("/media/{audio_filename}")
