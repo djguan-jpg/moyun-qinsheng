@@ -385,7 +385,7 @@ def test_public_gallery_plays_uploaded_audio_without_exposing_discord_identity(t
     assert "一段公開的旋律。" not in gallery.text
     assert "/guyun/media/sample.mp3" in gallery.text
     assert '/guyun/anonymous-visualizer.js' in gallery.text
-    assert '<canvas class="anonymous-visualizer" data-artwork="ink-resonance" data-background="/guyun/art/ink-resonance"></canvas>' in gallery.text
+    assert '<canvas class="anonymous-visualizer" data-artwork="ink-resonance" data-background="/guyun/art/ink-resonance?v=canvas-artwork-20260825"></canvas>' in gallery.text
     assert '<video' not in gallery.text
     assert "@keyframes anonymous-art" not in gallery.text
     assert "animation:anonymous-art" not in gallery.text

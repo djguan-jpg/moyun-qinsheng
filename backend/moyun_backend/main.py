@@ -339,7 +339,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             audio_type = html.escape(work["audio_content_type"] or "audio/mpeg")
             artwork_keys = tuple(ANONYMOUS_ARTWORKS)
             artwork_key = artwork_keys[(work["id"] - 1) % len(artwork_keys)]
-            artwork_url = public_path(settings, "/art/" + artwork_key)
+            artwork_url = public_path(settings, "/art/" + artwork_key + "?v=canvas-artwork-20260825")
             if settings.public_reveal_work_metadata:
                 metadata = f"""<p class="eyebrow">匿名作品 #{work['id']:03d}・{html.escape(work['category'])}</p>
 <h2>{html.escape(work['work_title'])}</h2><p class="muted">{html.escape(work['description'])}</p>"""
