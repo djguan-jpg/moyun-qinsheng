@@ -218,6 +218,7 @@ def test_creator_can_update_existing_registration_and_optionally_replace_audio(t
         assert "修改參賽作品" in edit_page.text
         assert "value=\"原始作品\"" in edit_page.text
         assert "留空會保留目前音檔" in edit_page.text
+        assert 'href="/">← 返回古韻新生網站' in edit_page.text
         assert metadata_update.status_code == 303
         assert metadata_update.headers["location"] == "/guyun/register?saved=updated"
         with open_database(settings.database_path) as connection:

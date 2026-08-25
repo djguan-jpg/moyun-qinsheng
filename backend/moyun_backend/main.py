@@ -526,7 +526,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not is_open:
             return page(
                 "報名尚未開放",
-                f"<h1>目前無法報名</h1>{notice(message)}<p>已登入為 {html.escape(user['display_name'])}。</p>",
+                f"<h1>目前無法報名</h1>{notice(message)}<p>已登入為 {html.escape(user['display_name'])}。</p><a class=\"button\" href=\"/\">返回古韻新生網站</a>",
             )
         request.session["csrf_token"] = secrets.token_urlsafe(32)
         with open_database(settings.database_path) as connection:
@@ -563,6 +563,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         body = f"""
 <p class="eyebrow">DISCORD VERIFIED ENTRY</p><h1>{'修改參賽作品' if is_editing else '提交參賽作品'}</h1>
 <p class="muted">登入帳號：{html.escape(user['display_name'])}。每個帳號僅保留一筆有效報名。</p>{messages}{existing_summary}
+<p><a class="button" href="/">← 返回古韻新生網站</a></p>
 <form method="post" action="{public_path(settings, '/register')}" enctype="multipart/form-data">
   <input type="hidden" name="csrf_token" value="{request.session['csrf_token']}">
   <label>作品名稱<input name="work_title" required maxlength="200" value="{work_title}" placeholder="請輸入作品名稱"></label>
