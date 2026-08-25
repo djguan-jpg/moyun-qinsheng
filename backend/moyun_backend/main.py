@@ -233,7 +233,34 @@ def page(title: str, body: str, *, status_code: int = 200) -> HTMLResponse:
   .muted {{ color:#66736e; font-size:.92rem; }} .logout {{ margin-top:24px; background:transparent; color:#234d45; padding:0; text-decoration:underline; }}
   .gallery,.admin {{ width:min(1060px,calc(100% - 40px)); }} .gallery-grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:18px; margin-top:24px; }} .work {{ padding:20px; border:1px solid #d8d1c3; background:#fff; }} .work h2 {{ margin:.3rem 0 .8rem; font-size:1.2rem; }} audio {{ width:100%; }}
   .admin-stats {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin:24px 0; }} .admin-stats article {{ padding:18px; background:#f3f6f1; border:1px solid #d8d1c3; }} .admin-stats p,.admin-stats h2 {{ margin:.15rem 0; }} table {{ width:100%; border-collapse:collapse; margin-top:16px; }} th,td {{ padding:12px 8px; border-bottom:1px solid #ded8cb; text-align:left; vertical-align:top; }} th {{ color:#66736e; font-size:.82rem; }}
-</style></head><body><main>{body}</main></body></html>"""
+</style></head><body><main>{body}</main><script>
+(() => {{
+  const cards = Array.from(document.querySelectorAll(".work"));
+  const stopArtwork = (card, reset = false) => {{
+    const artwork = card.querySelector(".anonymous-art video");
+    if (!artwork) return;
+    artwork.pause();
+    if (reset) artwork.currentTime = 0;
+  }};
+
+  cards.forEach((card) => {{
+    const audio = card.querySelector("audio");
+    const artwork = card.querySelector(".anonymous-art video");
+    if (!audio || !artwork) return;
+
+    audio.addEventListener("play", () => {{
+      cards.forEach((otherCard) => {{
+        if (otherCard === card) return;
+        otherCard.querySelector("audio")?.pause();
+        stopArtwork(otherCard, true);
+      }});
+      artwork.play().catch(() => {{}});
+    }});
+    audio.addEventListener("pause", () => stopArtwork(card));
+    audio.addEventListener("ended", () => stopArtwork(card, true));
+  }});
+}})();
+</script></body></html>"""
     return HTMLResponse(document, status_code=status_code)
 
 
@@ -346,7 +373,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             else:
                 metadata = f"""<p class="eyebrow">ANONYMOUS ENTRY</p>
 <h2>匿名作品 #{work['id']:03d}</h2><p class="muted">歌名與創作理念將於主辦單位公告後統一公開。</p>"""
-            return f"""<article class="work"><div class="anonymous-art" aria-hidden="true"><video autoplay muted loop playsinline preload="metadata"><source src="{artwork_url}" type="video/mp4"></video></div>{metadata}
+            return f"""<article class="work"><div class="anonymous-art" aria-hidden="true"><video muted loop playsinline preload="metadata"><source src="{artwork_url}" type="video/mp4"></video></div>{metadata}
 <audio controls preload="metadata"><source src="{audio_source}" type="{audio_type}">你的瀏覽器不支援音檔播放。</audio></article>"""
 
         cards = "".join(

@@ -384,8 +384,11 @@ def test_public_gallery_plays_uploaded_audio_without_exposing_discord_identity(t
     assert "一段公開的旋律。" not in gallery.text
     assert "/guyun/media/sample.mp3" in gallery.text
     assert "/guyun/art/ink-resonance" in gallery.text
-    assert '<video autoplay muted loop playsinline preload="metadata">' in gallery.text
+    assert '<video muted loop playsinline preload="metadata">' in gallery.text
     assert '<source src="/guyun/art/ink-resonance" type="video/mp4">' in gallery.text
+    assert "audio.addEventListener(\"play\"" in gallery.text
+    assert "artwork.play().catch" in gallery.text
+    assert "autoplay muted" not in gallery.text
     assert "@keyframes anonymous-art" not in gallery.text
     assert "animation:anonymous-art" not in gallery.text
     assert "private-username" not in gallery.text
