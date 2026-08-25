@@ -1,0 +1,11 @@
+[Unit]
+Description=Back up Guyun registration data every three hours
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=3h
+Persistent=true
+Unit=guyun-registration-backup.service
+
+[Install]
+WantedBy=timers.target

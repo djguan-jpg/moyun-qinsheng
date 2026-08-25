@@ -41,6 +41,10 @@ window.MOYUN_BACKEND_CONFIG = Object.freeze({
 
 報名表必須上傳一個 MP3、M4A、WAV、OGG 或 WEBM 音檔，檔案上限為 25 MB。報名完成後，音檔會立即出現在 `/works` 公開展演頁並可直接播放；頁面不會顯示 Discord 帳號或創作者姓名，也不收集聯絡信箱。
 
+## 主機備份
+
+`ops/guyun-registration-backup.sh` 搭配同目錄的 systemd service 與 timer，會每 3 小時備份 `data/` 中的投稿資料與音檔。資料庫會以 SQLite backup API 建立一致性快照；未變更的音檔會使用硬連結去重，備份存放於 `backups/<UTC 時間戳>/`。不會自動刪除歷史備份，應依主機的可用空間另行決定保留策略。
+
 ## 預設時程
 
 報名開放時間由 `.env` 的 `REGISTRATION_START_AT` 與 `REGISTRATION_END_AT` 控制，採用 ISO 8601 格式。範例已設定為 2026-08-25 12:00（台北時間）開放，2026-09-12 23:59 截止；結束時間留空則持續開放。
