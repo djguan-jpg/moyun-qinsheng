@@ -146,6 +146,74 @@ def test_discord_administrator_role_can_access_admin_dashboard(tmp_path, monkeyp
     assert dashboard.status_code == 200
 
 
+def test_admin_dashboard_shows_discord_submitter_and_live_vote_counts(tmp_path, monkeypatch):
+    settings = Settings(
+        client_id="client-id",
+        client_secret="client-secret",
+        guild_id="guild-id",
+        participant_role_id="participant-role",
+        redirect_uri="https://example.test/auth/callback",
+        session_secret="test-secret",
+        session_https_only=False,
+        database_path=tmp_path / "registrations.sqlite3",
+        registration_start_at=None,
+        registration_end_at=None,
+        public_base_path="",
+        admin_role_ids=frozenset({"administrator-role"}),
+    )
+
+    async def fake_exchange(_settings, _code):
+        return {
+            "user": {"id": "administrator", "username": "administrator"},
+            "member": {"roles": ["administrator-role"]},
+        }
+
+    monkeypatch.setattr(main, "exchange_discord_code", fake_exchange)
+    with TestClient(create_app(settings)) as client:
+        login = client.get("/auth/login?next=admin", follow_redirects=False)
+        state = parse_qs(urlparse(login.headers["location"]).query)["state"][0]
+        client.get(f"/auth/callback?code=test-code&state={state}", follow_redirects=False)
+        with open_database(settings.database_path) as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO registrations
+                (discord_user_id, discord_username, display_name, work_title, category, description, contact_email,
+                 created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "creator-id",
+                    "music_creator",
+                    "音樂創作者",
+                    "月下長安",
+                    "古風音樂",
+                    "測試投稿。",
+                    "",
+                    "2026-08-25 12:00:00 CST",
+                ),
+            )
+            registration_id = cursor.lastrowid
+            connection.executemany(
+                """
+                INSERT INTO votes (registration_id, voter_discord_id, stage, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                [
+                    (registration_id, "voter-1", "stage_1", "2026-08-25 12:01:00 CST"),
+                    (registration_id, "voter-2", "stage_1", "2026-08-25 12:02:00 CST"),
+                    (registration_id, "voter-3", "stage_1", "2026-08-25 12:03:00 CST"),
+                ],
+            )
+        dashboard = client.get("/admin")
+
+    assert dashboard.status_code == 200
+    assert "投稿者 Discord 名稱" in dashboard.text
+    assert "music_creator" in dashboard.text
+    assert "即時有效票數" in dashboard.text
+    assert "3 票" in dashboard.text
+    assert "每 10 秒自動更新" in dashboard.text
+
+
 def test_public_gallery_plays_uploaded_audio_without_exposing_discord_identity(tmp_path):
     settings = Settings(
         client_id="",

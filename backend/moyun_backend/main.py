@@ -140,6 +140,19 @@ def initialise_database(path: Path) -> None:
         }.items():
             if column not in columns:
                 connection.execute(f"ALTER TABLE registrations ADD COLUMN {column} {definition}")
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS votes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                registration_id INTEGER NOT NULL REFERENCES registrations(id) ON DELETE CASCADE,
+                voter_discord_id TEXT NOT NULL,
+                stage TEXT NOT NULL DEFAULT 'stage_1',
+                created_at TEXT NOT NULL,
+                UNIQUE (registration_id, voter_discord_id, stage)
+            )
+            """
+        )
+        connection.execute("CREATE INDEX IF NOT EXISTS votes_registration_id_idx ON votes(registration_id)")
 
 
 def uploads_directory(settings: Settings) -> Path:
@@ -410,18 +423,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             test_uploads = connection.execute(
                 "SELECT COUNT(*) FROM registrations WHERE is_test = 1"
             ).fetchone()[0]
+            valid_votes = connection.execute("SELECT COUNT(*) FROM votes").fetchone()[0]
             registrations = connection.execute(
                 """
-                SELECT id, work_title, category, description, audio_filename, audio_content_type, is_test, created_at
-                FROM registrations ORDER BY id DESC LIMIT 50
+                SELECT registrations.id, registrations.discord_username, registrations.display_name,
+                       registrations.work_title, registrations.category, registrations.description,
+                       registrations.audio_filename, registrations.audio_content_type, registrations.is_test,
+                       registrations.created_at, COUNT(votes.id) AS vote_count
+                FROM registrations
+                LEFT JOIN votes ON votes.registration_id = registrations.id
+                GROUP BY registrations.id
+                ORDER BY registrations.id DESC LIMIT 50
                 """
             ).fetchall()
         start = format_time(settings.registration_start_at) if settings.registration_start_at else "未設定"
         end = format_time(settings.registration_end_at) if settings.registration_end_at else "未設定"
         rows = "".join(
-            f"""<tr><td>#{item['id']:03d}</td><td><strong>{html.escape(item['work_title'])}</strong>{' <span class=\"muted\">（測試）</span>' if item['is_test'] else ''}<br><span class=\"muted\">{html.escape(item['description'])}</span></td><td>{html.escape(item['category'])}</td><td>{html.escape(item['created_at'])}</td><td>{('<a href=\"' + public_path(settings, '/media/' + item['audio_filename']) + '\">播放音檔</a>') if item['audio_filename'] else '—'}</td></tr>"""
+            f"""<tr><td>#{item['id']:03d}</td><td><strong>{html.escape(item['discord_username'])}</strong><br><span class=\"muted\">{html.escape(item['display_name'])}</span></td><td><strong>{html.escape(item['work_title'])}</strong>{' <span class=\"muted\">（測試）</span>' if item['is_test'] else ''}<br><span class=\"muted\">{html.escape(item['description'])}</span></td><td>{html.escape(item['category'])}</td><td>{html.escape(item['created_at'])}</td><td>{item['vote_count']} 票</td><td>{('<a href=\"' + public_path(settings, '/media/' + item['audio_filename']) + '\">播放音檔</a>') if item['audio_filename'] else '—'}</td></tr>"""
             for item in registrations
-        ) or "<tr><td colspan=\"5\">目前尚無投稿資料。</td></tr>"
+        ) or "<tr><td colspan=\"7\">目前尚無投稿資料。</td></tr>"
         request.session["csrf_token"] = secrets.token_urlsafe(32)
         messages = ""
         if test_uploaded:
@@ -431,12 +451,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         body = f"""
 <p class=\"eyebrow\">DISCORD ADMINISTRATION</p><h1>古韻新生・管理後台</h1>
 <p class=\"muted\">已登入為 {html.escape(user['display_name'])}。只有活動 Discord 伺服器管理員可存取此頁。</p>
-<div class=\"admin-stats\"><article><p>投稿總數</p><h2>{total}</h2></article><article><p>已上傳音檔</p><h2>{with_audio}</h2></article><article><p>測試作品</p><h2>{test_uploads}</h2></article><article><p>報名開放</p><h2>{html.escape(start)}</h2></article><article><p>報名截止</p><h2>{html.escape(end)}</h2></article></div>
+<div class=\"admin-stats\"><article><p>投稿總數</p><h2>{total}</h2></article><article><p>即時有效票數</p><h2>{valid_votes}</h2></article><article><p>已上傳音檔</p><h2>{with_audio}</h2></article><article><p>測試作品</p><h2>{test_uploads}</h2></article><article><p>報名開放</p><h2>{html.escape(start)}</h2></article><article><p>報名截止</p><h2>{html.escape(end)}</h2></article></div>
+<p class=\"muted\">● 後台資料每 10 秒自動更新；Discord 名稱與票數僅顯示給管理員。</p>
 <h2>測試作品上傳</h2>{messages}<p class=\"muted\">測試作品不會顯示在一般訪客的公開作品展演頁，僅供後台驗證上傳與播放功能。</p>
 <form method=\"post\" action=\"{public_path(settings, '/admin/test-upload')}\" enctype=\"multipart/form-data\"><input type=\"hidden\" name=\"csrf_token\" value=\"{request.session['csrf_token']}\"><label>測試作品名稱<input name=\"work_title\" required maxlength=\"200\" placeholder=\"例如：後台音檔測試\"></label><label>測試說明<textarea name=\"description\" required maxlength=\"2000\" placeholder=\"可記錄本次測試內容"></textarea></label><label>音檔<input name=\"audio_file\" required type=\"file\" accept=\"audio/mpeg,audio/mp4,audio/wav,audio/ogg,audio/webm,.mp3,.m4a,.wav,.ogg,.webm\"></label><p class=\"muted\">支援 MP3、M4A、WAV、OGG、WEBM，檔案大小上限 25 MB。</p><button type=\"submit\">上傳測試作品</button></form>
-<h2>最新投稿</h2><table><thead><tr><th>編號</th><th>作品</th><th>組別</th><th>提交時間</th><th>音檔</th></tr></thead><tbody>{rows}</tbody></table>
+<h2>最新投稿</h2><table><thead><tr><th>編號</th><th>投稿者 Discord 名稱</th><th>作品</th><th>組別</th><th>提交時間</th><th>即時票數</th><th>音檔</th></tr></thead><tbody>{rows}</tbody></table>
 <p><a class=\"button\" href=\"{public_path(settings, '/works')}\">查看公開展演</a></p>
-<form method=\"post\" action=\"{public_path(settings, '/auth/logout')}\"><button class=\"logout\" type=\"submit\">登出</button></form>"""
+<form method=\"post\" action=\"{public_path(settings, '/auth/logout')}\"><button class=\"logout\" type=\"submit\">登出</button></form><script>window.setTimeout(() => window.location.reload(), 10000);</script>"""
         return page("管理後台", body)
 
     @app.post("/admin/test-upload")
