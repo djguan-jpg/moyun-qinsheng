@@ -127,7 +127,8 @@ def initialise_database(path: Path) -> None:
                 audio_content_type TEXT,
                 audio_size INTEGER,
                 is_test INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                updated_at TEXT
             )
             """
         )
@@ -137,6 +138,7 @@ def initialise_database(path: Path) -> None:
             "audio_content_type": "TEXT",
             "audio_size": "INTEGER",
             "is_test": "INTEGER NOT NULL DEFAULT 0",
+            "updated_at": "TEXT",
         }.items():
             if column not in columns:
                 connection.execute(f"ALTER TABLE registrations ADD COLUMN {column} {definition}")
@@ -298,7 +300,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         body = f"""
 <p class="eyebrow">GUYUN XINSHENG</p><h1>古韻新生・線上報名</h1>
 {notice(message, success=is_open)}
-<p>以 Discord 驗證身分後，即可提交古風音樂作品資料。每個 Discord 帳號限一筆有效報名；投稿結束後將進入開放所有人參與的公開投票淘汰賽，最後設敗部復活賽。</p>
+<p>以 Discord 驗證身分後，即可提交古風音樂作品資料。每個 Discord 帳號限一筆有效報名；報名截止前可隨時修改已提交的資料。投稿結束後將進入開放所有人參與的公開投票淘汰賽，最後設敗部復活賽。</p>
 <a class="button" href="{public_path(settings, '/register')}">{login_label}</a>
 <a class="button" href="{public_path(settings, '/works')}">聆聽公開作品</a>"""
         return page("線上報名", body)
@@ -527,33 +529,49 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 f"<h1>目前無法報名</h1>{notice(message)}<p>已登入為 {html.escape(user['display_name'])}。</p>",
             )
         request.session["csrf_token"] = secrets.token_urlsafe(32)
-        existing = None
         with open_database(settings.database_path) as connection:
             existing = connection.execute(
-                "SELECT work_title, created_at FROM registrations WHERE discord_user_id = ?", (user["id"],)
+                """
+                SELECT work_title, category, description, audio_filename, created_at, updated_at
+                FROM registrations WHERE discord_user_id = ?
+                """,
+                (user["id"],),
             ).fetchone()
-        if existing:
-            return page(
-                "已完成報名",
-                f"<h1>你已完成報名</h1>{notice('已收到《' + existing['work_title'] + '》的資料。', success=True)}<p>提交時間：{html.escape(existing['created_at'])}</p><a class=\"button\" href=\"{public_path(settings, '/works')}\">聆聽公開作品</a>",
-            )
         messages = ""
-        if saved:
+        if saved == "updated":
+            messages += notice("報名資料已更新。", success=True)
+        elif saved:
             messages += notice("報名資料已送出。", success=True)
         if error:
             messages += notice(error)
+        is_editing = existing is not None
+        work_title = html.escape(existing["work_title"], quote=True) if existing else ""
+        description = html.escape(existing["description"]) if existing else ""
+        category = existing["category"] if existing else "古風音樂"
+        current_audio = existing["audio_filename"] if existing else None
+        timestamp_label = "最後修改時間" if existing and existing["updated_at"] else "提交時間"
+        timestamp = (existing["updated_at"] or existing["created_at"]) if existing else ""
+        existing_summary = (
+            f"{notice('已收到《' + existing['work_title'] + '》的資料。', success=True)}"
+            f"<p>{timestamp_label}：{html.escape(timestamp)}</p>"
+            if existing
+            else ""
+        )
+        audio_label = "作品音檔（留空會保留目前音檔）" if current_audio else "作品音檔"
+        audio_required = "" if current_audio else " required"
+        submit_label = "更新報名資料" if is_editing else "送出報名資料"
         body = f"""
-<p class="eyebrow">DISCORD VERIFIED ENTRY</p><h1>提交參賽作品</h1>
-<p class="muted">登入帳號：{html.escape(user['display_name'])}</p>{messages}
+<p class="eyebrow">DISCORD VERIFIED ENTRY</p><h1>{'修改參賽作品' if is_editing else '提交參賽作品'}</h1>
+<p class="muted">登入帳號：{html.escape(user['display_name'])}。每個帳號僅保留一筆有效報名。</p>{messages}{existing_summary}
 <form method="post" action="{public_path(settings, '/register')}" enctype="multipart/form-data">
   <input type="hidden" name="csrf_token" value="{request.session['csrf_token']}">
-  <label>作品名稱<input name="work_title" required maxlength="200" placeholder="請輸入作品名稱"></label>
-  <label>參賽組別<select name="category"><option value="古風音樂">古風音樂</option></select></label>
-  <label>作品簡介<textarea name="description" required maxlength="2000" placeholder="請介紹創作理念、樂器與曲風"></textarea></label>
-  <label>作品音檔<input name="audio_file" required type="file" accept="audio/mpeg,audio/mp4,audio/wav,audio/ogg,audio/webm,.mp3,.m4a,.wav,.ogg,.webm"></label>
-  <p class="muted">支援 MP3、M4A、WAV、OGG、WEBM，檔案大小上限 25 MB。完成送出後，音檔會立即顯示於公開作品展演頁供其他人播放。</p>
+  <label>作品名稱<input name="work_title" required maxlength="200" value="{work_title}" placeholder="請輸入作品名稱"></label>
+  <label>參賽組別<select name="category"><option value="古風音樂"{' selected' if category == '古風音樂' else ''}>古風音樂</option></select></label>
+  <label>作品簡介<textarea name="description" required maxlength="2000" placeholder="請介紹創作理念、樂器與曲風">{description}</textarea></label>
+  <label>{audio_label}<input name="audio_file"{audio_required} type="file" accept="audio/mpeg,audio/mp4,audio/wav,audio/ogg,audio/webm,.mp3,.m4a,.wav,.ogg,.webm"></label>
+  <p class="muted">支援 MP3、M4A、WAV、OGG、WEBM，檔案大小上限 25 MB。{('如更換音檔，舊檔會在更新成功後移除。' if current_audio else '完成送出後，音檔會立即顯示於公開作品展演頁供其他人播放。')}</p>
   <label><span><input name="agreement" value="yes" type="checkbox" required> 我確認資料正確，並同意活動規則。</span></label>
-  <button type="submit">送出報名資料</button>
+  <button type="submit">{submit_label}</button>
 </form>
 <form method="post" action="{public_path(settings, '/auth/logout')}"><button class="logout" type="submit">登出</button></form>"""
         return page("提交參賽作品", body)
@@ -576,40 +594,72 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         description = str(form.get("description", "")).strip()
         agreement = str(form.get("agreement", ""))
         audio_upload = form.get("audio_file")
-        if not (work_title and category and description and agreement == "yes" and isinstance(audio_upload, UploadFile)):
+        has_new_audio = isinstance(audio_upload, UploadFile) and bool(audio_upload.filename)
+        with open_database(settings.database_path) as connection:
+            existing = connection.execute(
+                "SELECT audio_filename FROM registrations WHERE discord_user_id = ?", (user["id"],)
+            ).fetchone()
+        if not (work_title and category and description and agreement == "yes"):
             return RedirectResponse(public_path(settings, "/register") + "?error=請完整填寫所有必填欄位。", status_code=303)
+        if not existing and not has_new_audio:
+            return RedirectResponse(public_path(settings, "/register") + "?error=請上傳作品音檔。", status_code=303)
         if len(work_title) > 200 or len(description) > 2000:
             return RedirectResponse(public_path(settings, "/register") + "?error=欄位內容超過允許長度。", status_code=303)
-        try:
-            audio_filename, audio_content_type, audio_size = await save_audio_upload(audio_upload, settings)
-        except HTTPException as error:
-            return RedirectResponse(public_path(settings, "/register") + "?error=" + str(error.detail), status_code=303)
+        audio_filename = audio_content_type = None
+        audio_size = None
+        if has_new_audio:
+            try:
+                audio_filename, audio_content_type, audio_size = await save_audio_upload(audio_upload, settings)
+            except HTTPException as error:
+                return RedirectResponse(public_path(settings, "/register") + "?error=" + str(error.detail), status_code=303)
+        updated_at = datetime.now(TAIPEI).strftime("%Y-%m-%d %H:%M:%S %Z")
         try:
             with open_database(settings.database_path) as connection:
-                connection.execute(
-                    """
-                    INSERT INTO registrations
-                    (discord_user_id, discord_username, display_name, work_title, category, description, contact_email, audio_filename, audio_content_type, audio_size, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        user["id"],
-                        user["username"],
-                        user["display_name"],
-                        work_title,
-                        category,
-                        description,
-                        "",
-                        audio_filename,
-                        audio_content_type,
-                        audio_size,
-                        datetime.now(TAIPEI).strftime("%Y-%m-%d %H:%M:%S %Z"),
-                    ),
-                )
+                if existing:
+                    if has_new_audio:
+                        connection.execute(
+                            """
+                            UPDATE registrations
+                            SET discord_username = ?, display_name = ?, work_title = ?, category = ?, description = ?,
+                                audio_filename = ?, audio_content_type = ?, audio_size = ?, updated_at = ?
+                            WHERE discord_user_id = ?
+                            """,
+                            (user["username"], user["display_name"], work_title, category, description,
+                             audio_filename, audio_content_type, audio_size, updated_at, user["id"]),
+                        )
+                    else:
+                        connection.execute(
+                            """
+                            UPDATE registrations
+                            SET discord_username = ?, display_name = ?, work_title = ?, category = ?, description = ?,
+                                updated_at = ?
+                            WHERE discord_user_id = ?
+                            """,
+                            (user["username"], user["display_name"], work_title, category, description,
+                             updated_at, user["id"]),
+                        )
+                else:
+                    connection.execute(
+                        """
+                        INSERT INTO registrations
+                        (discord_user_id, discord_username, display_name, work_title, category, description, contact_email, audio_filename, audio_content_type, audio_size, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            user["id"], user["username"], user["display_name"], work_title, category,
+                            description, "", audio_filename, audio_content_type, audio_size, updated_at, updated_at,
+                        ),
+                    )
         except sqlite3.IntegrityError:
-            (uploads_directory(settings) / audio_filename).unlink(missing_ok=True)
+            if audio_filename:
+                (uploads_directory(settings) / audio_filename).unlink(missing_ok=True)
             return RedirectResponse(public_path(settings, "/register"), status_code=303)
-        return RedirectResponse(public_path(settings, "/register") + "?saved=1", status_code=303)
+        if existing and audio_filename and existing["audio_filename"]:
+            old_audio = Path(existing["audio_filename"])
+            if old_audio.name == existing["audio_filename"] and old_audio.name != audio_filename:
+                (uploads_directory(settings) / old_audio.name).unlink(missing_ok=True)
+        status = "updated" if existing else "created"
+        return RedirectResponse(public_path(settings, "/register") + f"?saved={status}", status_code=303)
 
     @app.post("/auth/logout")
     async def logout(request: Request):

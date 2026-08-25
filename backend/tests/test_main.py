@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+import re
 from urllib.parse import parse_qs, urlparse
 
 from fastapi.testclient import TestClient
@@ -144,6 +145,118 @@ def test_discord_administrator_role_can_access_admin_dashboard(tmp_path, monkeyp
     assert callback.status_code == 303
     assert callback.headers["location"] == "/admin"
     assert dashboard.status_code == 200
+
+
+def test_creator_can_update_existing_registration_and_optionally_replace_audio(tmp_path, monkeypatch):
+    settings = Settings(
+        client_id="client-id",
+        client_secret="client-secret",
+        guild_id="guild-id",
+        participant_role_id="participant-role",
+        redirect_uri="https://example.test/auth/callback",
+        session_secret="test-secret",
+        session_https_only=False,
+        database_path=tmp_path / "data" / "registrations.sqlite3",
+        registration_start_at=None,
+        registration_end_at=None,
+        public_base_path="/guyun",
+    )
+
+    async def fake_exchange(_settings, _code):
+        return {
+            "user": {"id": "creator-id", "username": "creator"},
+            "member": {"roles": ["participant-role"]},
+        }
+
+    monkeypatch.setattr(main, "exchange_discord_code", fake_exchange)
+    with TestClient(create_app(settings)) as client:
+        login = client.get("/auth/login", follow_redirects=False)
+        state = parse_qs(urlparse(login.headers["location"]).query)["state"][0]
+        callback = client.get(f"/auth/callback?code=test-code&state={state}", follow_redirects=False)
+        old_audio = settings.database_path.parent / "uploads" / "original.mp3"
+        old_audio.parent.mkdir(parents=True, exist_ok=True)
+        old_audio.write_bytes(b"original-audio")
+        with open_database(settings.database_path) as connection:
+            connection.execute(
+                """
+                INSERT INTO registrations
+                (discord_user_id, discord_username, display_name, work_title, category, description, contact_email,
+                 audio_filename, audio_content_type, audio_size, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "creator-id",
+                    "creator",
+                    "創作者",
+                    "原始作品",
+                    "古風音樂",
+                    "原始簡介。",
+                    "",
+                    "original.mp3",
+                    "audio/mpeg",
+                    len(b"original-audio"),
+                    "2026-08-25 12:00:00 CST",
+                ),
+            )
+
+        edit_page = client.get("/register")
+        csrf = re.search(r'name="csrf_token" value="([^"]+)"', edit_page.text)[1]
+        metadata_update = client.post(
+            "/register",
+            data={
+                "csrf_token": csrf,
+                "work_title": "更新後作品",
+                "category": "古風音樂",
+                "description": "更新後簡介。",
+                "agreement": "yes",
+            },
+            follow_redirects=False,
+        )
+
+        assert callback.headers["location"] == "/guyun/register"
+        assert edit_page.status_code == 200
+        assert "修改參賽作品" in edit_page.text
+        assert "value=\"原始作品\"" in edit_page.text
+        assert "留空會保留目前音檔" in edit_page.text
+        assert metadata_update.status_code == 303
+        assert metadata_update.headers["location"] == "/guyun/register?saved=updated"
+        with open_database(settings.database_path) as connection:
+            registration = connection.execute(
+                "SELECT * FROM registrations WHERE discord_user_id = ?", ("creator-id",)
+            ).fetchone()
+            assert connection.execute("SELECT COUNT(*) FROM registrations").fetchone()[0] == 1
+        assert registration["work_title"] == "更新後作品"
+        assert registration["description"] == "更新後簡介。"
+        assert registration["audio_filename"] == "original.mp3"
+        assert registration["created_at"] == "2026-08-25 12:00:00 CST"
+        assert registration["updated_at"]
+        assert old_audio.read_bytes() == b"original-audio"
+
+        refreshed_page = client.get("/register")
+        refreshed_csrf = re.search(r'name="csrf_token" value="([^"]+)"', refreshed_page.text)[1]
+        replacement_update = client.post(
+            "/register",
+            data={
+                "csrf_token": refreshed_csrf,
+                "work_title": "替換音檔後作品",
+                "category": "古風音樂",
+                "description": "替換音檔後簡介。",
+                "agreement": "yes",
+            },
+            files={"audio_file": ("replacement.mp3", b"replacement-audio", "audio/mpeg")},
+            follow_redirects=False,
+        )
+
+        assert replacement_update.status_code == 303
+        assert replacement_update.headers["location"] == "/guyun/register?saved=updated"
+        with open_database(settings.database_path) as connection:
+            registration = connection.execute(
+                "SELECT * FROM registrations WHERE discord_user_id = ?", ("creator-id",)
+            ).fetchone()
+        assert registration["work_title"] == "替換音檔後作品"
+        assert registration["audio_filename"] != "original.mp3"
+        assert not old_audio.exists()
+        assert (settings.database_path.parent / "uploads" / registration["audio_filename"]).read_bytes() == b"replacement-audio"
 
 
 def test_admin_dashboard_shows_discord_submitter_and_live_vote_counts(tmp_path, monkeypatch):
