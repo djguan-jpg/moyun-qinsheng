@@ -221,7 +221,7 @@ def page(title: str, body: str, *, status_code: int = 200) -> HTMLResponse:
 <html lang="zh-Hant"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{html.escape(title)}｜古韻新生</title>
 <style>
-  .anonymous-art {{ height:190px; overflow:hidden; margin:-20px -20px 18px; background:#1c312a; }}
+  .anonymous-art {{ height:clamp(190px,31vw,250px); overflow:hidden; margin:-20px -20px 18px; background:#1c312a; }}
   .anonymous-art img {{ display:block; width:100%; height:100%; object-fit:cover; }}
   .anonymous-art {{ position:relative; }} .anonymous-art canvas {{ position:absolute; inset:0; display:block; width:100%; height:100%; pointer-events:none; }}
   :root {{ color-scheme: light; font-family: "Noto Serif TC", "Microsoft JhengHei", serif; color: #19302c; background:#f5f2e9; }}
@@ -233,6 +233,7 @@ def page(title: str, body: str, *, status_code: int = 200) -> HTMLResponse:
   .notice {{ padding:13px 15px; border-left:4px solid #9d4733; background:#f6e9e3; }} .success {{ border-color:#28634c; background:#e6f1e9; }}
   .muted {{ color:#66736e; font-size:.92rem; }} .logout {{ margin-top:24px; background:transparent; color:#234d45; padding:0; text-decoration:underline; }}
   .gallery,.admin {{ width:min(1060px,calc(100% - 40px)); }} .gallery-grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:18px; margin-top:24px; }} .work {{ padding:20px; border:1px solid #d8d1c3; background:#fff; }} .work h2 {{ margin:.3rem 0 .8rem; font-size:1.2rem; }} audio {{ width:100%; }}
+  @media (max-width:640px) {{ body {{ display:block; }} main {{ width:calc(100% - 24px); margin:12px; padding:16px; }} .gallery-grid {{ grid-template-columns:1fr; gap:14px; margin-top:18px; }} .work {{ padding:14px; }} .anonymous-art {{ height:clamp(190px,58vw,280px); margin:-14px -14px 15px; }} .work h2 {{ font-size:1.13rem; }} }}
   .admin-stats {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin:24px 0; }} .admin-stats article {{ padding:18px; background:#f3f6f1; border:1px solid #d8d1c3; }} .admin-stats p,.admin-stats h2 {{ margin:.15rem 0; }} table {{ width:100%; border-collapse:collapse; margin-top:16px; }} th,td {{ padding:12px 8px; border-bottom:1px solid #ded8cb; text-align:left; vertical-align:top; }} th {{ color:#66736e; font-size:.82rem; }}
 </style></head><body><main>{body}</main></body></html>"""
     return HTMLResponse(document, status_code=status_code)
@@ -340,7 +341,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             audio_type = html.escape(work["audio_content_type"] or "audio/mpeg")
             artwork_keys = tuple(ANONYMOUS_ARTWORKS)
             artwork_key = artwork_keys[(work["id"] - 1) % len(artwork_keys)]
-            artwork_url = public_path(settings, "/art/" + artwork_key + "?v=canvas-artwork-20260825-v2")
+            artwork_url = public_path(settings, "/art/" + artwork_key + "?v=canvas-artwork-20260825-v3")
             if settings.public_reveal_work_metadata:
                 metadata = f"""<p class="eyebrow">匿名作品 #{work['id']:03d}・{html.escape(work['category'])}</p>
 <h2>{html.escape(work['work_title'])}</h2><p class="muted">{html.escape(work['description'])}</p>"""

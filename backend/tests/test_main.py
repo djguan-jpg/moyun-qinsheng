@@ -384,7 +384,7 @@ def test_public_gallery_plays_uploaded_audio_without_exposing_discord_identity(t
     assert "月下長安" not in gallery.text
     assert "一段公開的旋律。" not in gallery.text
     assert "/guyun/media/sample.mp3" in gallery.text
-    assert '<img src="/guyun/art/ink-resonance?v=canvas-artwork-20260825-v2" alt=""><canvas class="anonymous-visualizer" data-artwork="ink-resonance"></canvas>' in gallery.text
+    assert '<img src="/guyun/art/ink-resonance?v=canvas-artwork-20260825-v3" alt=""><canvas class="anonymous-visualizer" data-artwork="ink-resonance"></canvas>' in gallery.text
     assert '/guyun/anonymous-visualizer.js' in gallery.text
     assert '<video' not in gallery.text
     assert "@keyframes anonymous-art" not in gallery.text
@@ -401,6 +401,9 @@ def test_public_gallery_plays_uploaded_audio_without_exposing_discord_identity(t
     assert "createMediaElementSource" in visualizer.text
     assert "getByteFrequencyData" in visualizer.text
     assert "requestAnimationFrame" in visualizer.text
+    assert "fillFacet" in visualizer.text
+    assert "gilded" not in visualizer.text
+    assert "ink-flow" not in visualizer.text
 
 
 def test_public_gallery_hides_admin_test_uploads(tmp_path):

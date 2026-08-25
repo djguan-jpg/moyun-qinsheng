@@ -1,13 +1,13 @@
 (() => {
   "use strict";
 
-  // The artwork is deliberately separate from this transparent canvas. These
-  // are responsive gilded sound threads, not an ink-flow, glow, or
-  // conventional spectrum-bar treatment.
+  // The three source artworks remain untouched underneath this transparent
+  // canvas. A canvas has no resting artwork of its own: every visible facet
+  // is derived from the currently playing audio.
   const palettes = {
-    "ink-resonance": "#e7ca73",
-    "moonlit-strings": "#a97928",
-    "landscape-score": "#d5a846",
+    "ink-resonance": ["#70d8d1", "#ff8977"],
+    "moonlit-strings": ["#91a8ff", "#d8c4ff"],
+    "landscape-score": ["#55c7a5", "#ff9c7a"],
   };
   const states = [];
   let audioContext;
@@ -44,87 +44,104 @@
     const { context, ratio, width, height } = state;
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, width, height);
-    context.lineCap = "round";
-    context.lineJoin = "round";
     return { context, width, height };
   };
 
-  const level = (state, spectrum, slot, index) => {
-    const next = band(spectrum, index);
+  const level = (state, spectrum, slot, index, spread = 2) => {
+    const next = band(spectrum, index, spread);
     const previous = state.levels[slot] ?? next;
-    const smoothed = previous * 0.79 + next * 0.21;
+    const smoothed = previous * 0.76 + next * 0.24;
     state.levels[slot] = smoothed;
     return smoothed;
   };
 
-  const strokeThread = (context, points, color, alpha, width) => {
+  const fillFacet = (context, points, color, alpha) => {
     context.save();
     context.globalAlpha = alpha;
-    context.strokeStyle = color;
-    context.lineWidth = width;
+    context.fillStyle = color;
     context.beginPath();
     context.moveTo(points[0].x, points[0].y);
-    for (let index = 1; index < points.length - 1; index += 1) {
-      const current = points[index];
-      const next = points[index + 1];
-      context.quadraticCurveTo(current.x, current.y, (current.x + next.x) * 0.5, (current.y + next.y) * 0.5);
-    }
-    const last = points[points.length - 1];
-    context.lineTo(last.x, last.y);
-    context.stroke();
+    points.slice(1).forEach((point) => context.lineTo(point.x, point.y));
+    context.closePath();
+    context.fill();
     context.restore();
   };
 
-  const threadPoints = (state, spectrum, slotOffset, count, pointAt) => (
-    Array.from({ length: count }, (_, index) => pointAt(index / (count - 1), level(state, spectrum, slotOffset + index, 3 + index * 5)))
-  );
-
-  // 墨韻共鳴：three restrained seal-like threads in the dark centre. They
-  // breathe with the music without becoming marks, crosses, or particle dots.
-  const drawInk = (state, spectrum) => {
+  // 折聲窗：audio opens a set of central, translucent folding panels.
+  const drawFoldingWindows = (state, spectrum, colors) => {
     const { context, width, height } = clear(state);
-    const energy = average(spectrum, 2, 44);
-    for (let lane = 0; lane < 3; lane += 1) {
-      const baseY = height * (0.45 + lane * 0.075);
-      const points = threadPoints(state, spectrum, lane * 28, 25, (progress, strength) => ({
-        x: width * (0.29 + progress * 0.42),
-        y: baseY + Math.sin(progress * Math.PI * 1.2 + lane * 0.55) * height * 0.021 - strength * height * (0.035 + energy * 0.03),
-      }));
-      strokeThread(context, points, palettes["ink-resonance"], 0.22 + energy * 0.36, 0.85 + lane * 0.12);
+    const bass = level(state, spectrum, 0, 6, 4);
+    for (let index = 0; index < 3; index += 1) {
+      const energy = level(state, spectrum, 1 + index, 19 + index * 13, 4);
+      const centerX = width * 0.5;
+      const gap = width * (0.018 + index * 0.052);
+      const reach = width * (0.075 + index * 0.035 + energy * 0.055);
+      const halfHeight = height * (0.14 + index * 0.055 + energy * 0.14 + bass * 0.06);
+      const lean = height * (0.028 + energy * 0.09);
+      const top = height * 0.5 - halfHeight;
+      const bottom = height * 0.5 + halfHeight;
+      const alpha = 0.1 + energy * 0.25;
+      fillFacet(context, [
+        { x: centerX - gap, y: top + lean },
+        { x: centerX - gap - reach, y: top },
+        { x: centerX - gap - reach * 0.66, y: bottom - lean },
+        { x: centerX - gap, y: bottom },
+      ], colors[index % 2], alpha);
+      fillFacet(context, [
+        { x: centerX + gap, y: top },
+        { x: centerX + gap + reach, y: top + lean },
+        { x: centerX + gap + reach * 0.66, y: bottom },
+        { x: centerX + gap, y: bottom - lean },
+      ], colors[(index + 1) % 2], alpha);
     }
   };
 
-  // 月下琴弦：short, fine qin strings in the open sky. Each line moves as one
-  // whole thread, rather than breaking into isolated visualizer symbols.
-  const drawMoon = (state, spectrum) => {
+  // 旋頁：a small set of broad facets pivots around the sound's midrange.
+  const drawTurningPages = (state, spectrum, colors) => {
     const { context, width, height } = clear(state);
-    const energy = average(spectrum, 3, 46);
-    for (let string = 0; string < 5; string += 1) {
-      const baseY = height * (0.47 + string * 0.06);
-      const points = threadPoints(state, spectrum, 90 + string * 28, 25, (progress, strength) => ({
-        x: width * (0.26 + progress * 0.53),
-        y: baseY + Math.sin(progress * Math.PI) * (height * 0.007 + strength * height * (0.038 + energy * 0.025)),
-      }));
-      strokeThread(context, points, palettes["moonlit-strings"], 0.2 + energy * 0.38, 0.72 + string * 0.08);
+    const centerX = width * 0.5;
+    const centerY = height * 0.52;
+    for (let index = 0; index < 4; index += 1) {
+      const energy = level(state, spectrum, 8 + index, 40 + index * 15, 5);
+      const rise = level(state, spectrum, 12 + index, 12 + index * 8, 3);
+      const span = width * (0.12 + index * 0.042 + energy * 0.08);
+      const depth = height * (0.075 + energy * 0.17);
+      const shift = height * (index - 1.5) * 0.055;
+      const tilt = height * (rise - 0.5) * 0.13;
+      fillFacet(context, [
+        { x: centerX - span, y: centerY + shift - tilt },
+        { x: centerX + span * 0.16, y: centerY + shift - depth },
+        { x: centerX + span, y: centerY + shift + tilt },
+        { x: centerX - span * 0.16, y: centerY + shift + depth },
+      ], colors[index % 2], 0.11 + energy * 0.27);
     }
   };
 
-  // 山水聲譜：one unbroken gold thread following a gentle mountain pass. It is
-  // continuous on purpose: a visual line for the score, never a flight path.
-  const drawLandscape = (state, spectrum) => {
+  // 層台：offset planes expand and contract at independent frequency bands.
+  const drawLayeredStages = (state, spectrum, colors) => {
     const { context, width, height } = clear(state);
-    const energy = average(spectrum, 2, 50);
-    const points = threadPoints(state, spectrum, 230, 37, (progress, strength) => ({
-      x: width * (0.13 + progress * 0.74),
-      y: height * (0.59 - Math.sin(progress * Math.PI) * 0.105 + (progress - 0.5) * 0.028) - strength * height * (0.035 + energy * 0.028),
-    }));
-    strokeThread(context, points, palettes["landscape-score"], 0.36 + energy * 0.42, 1.15 + energy * 0.7);
+    for (let index = 0; index < 4; index += 1) {
+      const energy = level(state, spectrum, 16 + index, 73 + index * 12, 5);
+      const pulse = level(state, spectrum, 20 + index, 8 + index * 6, 3);
+      const y = height * (0.34 + index * 0.105);
+      const left = width * (0.14 + index * 0.052 - energy * 0.035);
+      const right = width * (0.86 - index * 0.052 + energy * 0.035);
+      const depth = height * (0.045 + energy * 0.11);
+      const skew = width * (pulse - 0.5) * 0.075;
+      fillFacet(context, [
+        { x: left + skew, y },
+        { x: right + skew, y: y + depth * 0.38 },
+        { x: right - skew * 0.45, y: y + depth },
+        { x: left - skew * 0.45, y: y + depth * 0.62 },
+      ], colors[index % 2], 0.1 + energy * 0.25);
+    }
   };
 
   const draw = (state, spectrum) => {
-    if (state.artwork === "moonlit-strings") drawMoon(state, spectrum);
-    else if (state.artwork === "landscape-score") drawLandscape(state, spectrum);
-    else drawInk(state, spectrum);
+    const colors = palettes[state.artwork] || palettes["ink-resonance"];
+    if (state.artwork === "moonlit-strings") drawTurningPages(state, spectrum, colors);
+    else if (state.artwork === "landscape-score") drawLayeredStages(state, spectrum, colors);
+    else drawFoldingWindows(state, spectrum, colors);
   };
 
   const stopFrame = () => {
@@ -148,7 +165,7 @@
     if (state.analyser) return true;
     state.analyser = audioContext.createAnalyser();
     state.analyser.fftSize = 256;
-    state.analyser.smoothingTimeConstant = 0.78;
+    state.analyser.smoothingTimeConstant = 0.76;
     state.spectrum = new Uint8Array(state.analyser.frequencyBinCount);
     const source = audioContext.createMediaElementSource(state.audio);
     source.connect(state.analyser);
