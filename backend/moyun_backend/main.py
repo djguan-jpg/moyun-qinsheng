@@ -31,7 +31,11 @@ ALLOWED_AUDIO_TYPES = {
     ".ogg": {"audio/ogg", "application/ogg", "application/octet-stream"},
     ".webm": {"audio/webm", "application/octet-stream"},
 }
-ANONYMOUS_ARTWORK_KEYS = ("ink-resonance", "moonlit-strings", "landscape-score")
+ANONYMOUS_ARTWORKS = {
+    "ink-resonance": "ink-resonance.png",
+    "moonlit-strings": "moonlit-strings.png",
+    "landscape-score": "landscape-score.png",
+}
 
 # Docker Compose injects these values itself.  Local development reads backend/.env.
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
@@ -333,14 +337,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         def render_work_card(work: sqlite3.Row) -> str:
             audio_source = public_path(settings, "/media/" + work["audio_filename"])
             audio_type = html.escape(work["audio_content_type"] or "audio/mpeg")
-            artwork_key = ANONYMOUS_ARTWORK_KEYS[(work["id"] - 1) % len(ANONYMOUS_ARTWORK_KEYS)]
+            artwork_keys = tuple(ANONYMOUS_ARTWORKS)
+            artwork_key = artwork_keys[(work["id"] - 1) % len(artwork_keys)]
+            artwork_url = public_path(settings, "/art/" + artwork_key)
             if settings.public_reveal_work_metadata:
                 metadata = f"""<p class="eyebrow">匿名作品 #{work['id']:03d}・{html.escape(work['category'])}</p>
 <h2>{html.escape(work['work_title'])}</h2><p class="muted">{html.escape(work['description'])}</p>"""
             else:
                 metadata = f"""<p class="eyebrow">ANONYMOUS ENTRY</p>
 <h2>匿名作品 #{work['id']:03d}</h2><p class="muted">歌名與創作理念將於主辦單位公告後統一公開。</p>"""
-            return f"""<article class="work"><div class="anonymous-art" aria-hidden="true"><canvas class="anonymous-visualizer" data-artwork="{artwork_key}"></canvas></div>{metadata}
+            return f"""<article class="work"><div class="anonymous-art" aria-hidden="true"><canvas class="anonymous-visualizer" data-artwork="{artwork_key}" data-background="{artwork_url}"></canvas></div>{metadata}
 <audio controls preload="metadata"><source src="{audio_source}" type="{audio_type}">你的瀏覽器不支援音檔播放。</audio></article>"""
 
         cards = "".join(
@@ -366,6 +372,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="找不到音檔。")
         media_type, _ = mimetypes.guess_type(path.name)
         return FileResponse(path, media_type=media_type or "application/octet-stream")
+
+    @app.get("/art/{artwork}")
+    async def stream_anonymous_artwork(artwork: str) -> FileResponse:
+        filename = ANONYMOUS_ARTWORKS.get(artwork)
+        if not filename:
+            raise HTTPException(status_code=404, detail="找不到匿名作品圖案。")
+        path = Path(__file__).resolve().parent / "static" / "anonymous-art" / filename
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="找不到匿名作品圖案。")
+        return FileResponse(path, media_type="image/png", headers={"Cache-Control": "public, max-age=86400"})
 
     @app.get("/anonymous-visualizer.js")
     async def stream_anonymous_visualizer() -> FileResponse:

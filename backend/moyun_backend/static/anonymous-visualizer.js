@@ -40,6 +40,21 @@
     return { context, width, height };
   };
 
+  const drawBackground = (state, context, width, height, fallback, tint) => {
+    const background = state.background;
+    if (background?.complete && background.naturalWidth > 0) {
+      const scale = Math.max(width / background.naturalWidth, height / background.naturalHeight);
+      const drawWidth = background.naturalWidth * scale;
+      const drawHeight = background.naturalHeight * scale;
+      context.drawImage(background, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
+      context.fillStyle = tint;
+      context.fillRect(0, 0, width, height);
+      return;
+    }
+    context.fillStyle = fallback;
+    context.fillRect(0, 0, width, height);
+  };
+
   const drawInk = (state, spectrum) => {
     const { context, width, height } = begin(state);
     const theme = state.theme;
@@ -47,10 +62,11 @@
     const centerX = width * 0.5;
     const centerY = height * 0.54;
     const radius = Math.min(width, height) * (0.17 + energy * 0.08);
+    drawBackground(state, context, width, height, theme.ink, "rgba(5, 15, 14, 0.34)");
     const wash = context.createRadialGradient(centerX, centerY, 0, centerX, centerY, width * 0.72);
-    wash.addColorStop(0, "#1b302d");
-    wash.addColorStop(0.58, theme.ink);
-    wash.addColorStop(1, "#081110");
+    wash.addColorStop(0, "rgba(27, 48, 45, 0.48)");
+    wash.addColorStop(0.58, "rgba(12, 25, 24, 0.26)");
+    wash.addColorStop(1, "rgba(8, 17, 16, 0.42)");
     context.fillStyle = wash;
     context.fillRect(0, 0, width, height);
     context.strokeStyle = "#d9c47c";
@@ -80,32 +96,10 @@
     const { context, width, height } = begin(state);
     const theme = state.theme;
     const energy = average(spectrum, 3, 42);
-    const sky = context.createLinearGradient(0, 0, 0, height);
-    sky.addColorStop(0, "#f6ebc9");
-    sky.addColorStop(1, "#a9b8a4");
-    context.fillStyle = sky;
-    context.fillRect(0, 0, width, height);
-    context.fillStyle = "#fff6d5";
-    context.shadowColor = "#f6df94";
-    context.shadowBlur = 20 + energy * 36;
-    context.beginPath();
-    context.arc(width * 0.25, height * 0.32, Math.min(width, height) * 0.15, 0, Math.PI * 2);
-    context.fill();
-    context.shadowBlur = 0;
-    context.fillStyle = "#31514a";
-    context.globalAlpha = 0.72;
-    context.beginPath();
-    context.moveTo(0, height);
-    context.lineTo(width * 0.15, height * 0.6);
-    context.lineTo(width * 0.35, height * 0.78);
-    context.lineTo(width * 0.56, height * 0.48);
-    context.lineTo(width * 0.78, height * 0.72);
-    context.lineTo(width, height * 0.43);
-    context.lineTo(width, height);
-    context.closePath();
-    context.fill();
-    context.globalAlpha = 1;
+    drawBackground(state, context, width, height, theme.paper, "rgba(250, 239, 207, 0.17)");
     context.strokeStyle = theme.gold;
+    context.shadowColor = "#f6df94";
+    context.shadowBlur = 4 + energy * 16;
     context.lineWidth = 1.15;
     for (let string = 0; string < 7; string += 1) {
       const y = height * (0.48 + string * 0.055);
@@ -115,30 +109,13 @@
       context.bezierCurveTo(width * 0.31, y - amplitude, width * 0.62, y + amplitude, width + 8, y - amplitude * 0.16);
       context.stroke();
     }
+    context.shadowBlur = 0;
   };
 
   const drawLandscape = (state, spectrum) => {
     const { context, width, height } = begin(state);
     const theme = state.theme;
-    const sky = context.createLinearGradient(0, 0, 0, height);
-    sky.addColorStop(0, theme.paper);
-    sky.addColorStop(1, "#173c38");
-    context.fillStyle = sky;
-    context.fillRect(0, 0, width, height);
-    context.fillStyle = theme.mist;
-    context.globalAlpha = 0.38;
-    context.beginPath();
-    context.moveTo(0, height);
-    context.lineTo(width * 0.12, height * 0.35);
-    context.lineTo(width * 0.26, height * 0.63);
-    context.lineTo(width * 0.48, height * 0.27);
-    context.lineTo(width * 0.7, height * 0.68);
-    context.lineTo(width * 0.88, height * 0.34);
-    context.lineTo(width, height * 0.61);
-    context.lineTo(width, height);
-    context.closePath();
-    context.fill();
-    context.globalAlpha = 1;
+    drawBackground(state, context, width, height, theme.ink, "rgba(13, 38, 35, 0.22)");
     const centerY = height * 0.57;
     context.strokeStyle = theme.gold;
     context.shadowColor = "#f5dea0";
@@ -212,9 +189,15 @@
     const audio = card?.querySelector("audio");
     const context = canvas.getContext("2d");
     if (!audio || !context) return;
-    const state = { canvas, audio, context, artwork: canvas.dataset.artwork, theme: themes[canvas.dataset.artwork] || themes["ink-resonance"] };
+    const background = new Image();
+    background.decoding = "async";
+    const state = { canvas, audio, context, artwork: canvas.dataset.artwork, theme: themes[canvas.dataset.artwork] || themes["ink-resonance"], background };
     states.push(state);
     draw(state);
+    if (canvas.dataset.background) {
+      background.addEventListener("load", () => draw(state));
+      background.src = canvas.dataset.background;
+    }
     audio.addEventListener("play", () => { void activate(state); });
     audio.addEventListener("pause", () => {
       if (activeState !== state) return;
