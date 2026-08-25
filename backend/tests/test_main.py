@@ -371,6 +371,8 @@ def test_public_gallery_plays_uploaded_audio_without_exposing_discord_identity(t
             )
         gallery = client.get("/works")
         media = client.get("/media/sample.mp3")
+        artwork = client.get("/art/ink-resonance")
+        missing_artwork = client.get("/art/not-a-real-artwork")
 
     assert gallery.status_code == 200
     assert "匿名作品 #001" in gallery.text
@@ -378,10 +380,15 @@ def test_public_gallery_plays_uploaded_audio_without_exposing_discord_identity(t
     assert "月下長安" not in gallery.text
     assert "一段公開的旋律。" not in gallery.text
     assert "/guyun/media/sample.mp3" in gallery.text
+    assert "/guyun/art/ink-resonance" in gallery.text
+    assert "anonymous-art--ink-resonance" in gallery.text
     assert "private-username" not in gallery.text
     assert "私人顯示名稱" not in gallery.text
     assert media.status_code == 200
     assert media.content == b"fake-mp3-data"
+    assert artwork.status_code == 200
+    assert artwork.headers["content-type"] == "image/png"
+    assert missing_artwork.status_code == 404
 
 
 def test_public_gallery_hides_admin_test_uploads(tmp_path):
