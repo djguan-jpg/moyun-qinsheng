@@ -1,30 +1,29 @@
 (() => {
   "use strict";
 
-  const themes = {
-    "ink-resonance": { ink: "#0c1918", paper: "#263937", gold: "#dcc27c", mist: "#91a89a" },
-    "moonlit-strings": { ink: "#183331", paper: "#f2e5c1", gold: "#d2a848", mist: "#69877c" },
-    "landscape-score": { ink: "#102927", paper: "#dbe2cf", gold: "#e0bd65", mist: "#4e7569" },
+  const palettes = {
+    "ink-resonance": "#e4c878",
+    "moonlit-strings": "#c99d3d",
+    "landscape-score": "#e5bf61",
   };
-  const emptySpectrum = new Uint8Array(128);
   const states = [];
   let audioContext;
   let activeState;
-  let animationFrame;
+  let frameRequest;
 
-  const average = (data, start, end) => {
+  const average = (values, start, end) => {
     let total = 0;
-    const upper = Math.min(data.length, end);
-    for (let index = start; index < upper; index += 1) total += data[index];
+    const upper = Math.min(values.length, end);
+    for (let index = start; index < upper; index += 1) total += values[index];
     return upper > start ? total / ((upper - start) * 255) : 0;
   };
 
-  const resize = (state) => {
+  const fit = (state) => {
     const bounds = state.canvas.getBoundingClientRect();
     const ratio = Math.min(window.devicePixelRatio || 1, 2);
     const width = Math.max(1, Math.round(bounds.width));
     const height = Math.max(1, Math.round(bounds.height));
-    if (state.width === width && state.height === height && state.ratio === ratio) return;
+    if (width === state.width && height === state.height && ratio === state.ratio) return;
     state.width = width;
     state.height = height;
     state.ratio = ratio;
@@ -32,129 +31,95 @@
     state.canvas.height = height * ratio;
   };
 
-  const begin = (state) => {
-    resize(state);
+  const clear = (state) => {
+    fit(state);
     const { context, ratio, width, height } = state;
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, width, height);
     return { context, width, height };
   };
 
-  const drawBackground = (state, context, width, height, fallback, tint) => {
-    const background = state.background;
-    if (background?.complete && background.naturalWidth > 0) {
-      const scale = Math.max(width / background.naturalWidth, height / background.naturalHeight);
-      const drawWidth = background.naturalWidth * scale;
-      const drawHeight = background.naturalHeight * scale;
-      context.drawImage(background, (width - drawWidth) / 2, (height - drawHeight) / 2, drawWidth, drawHeight);
-      context.fillStyle = tint;
-      context.fillRect(0, 0, width, height);
-      return;
-    }
-    context.fillStyle = fallback;
-    context.fillRect(0, 0, width, height);
-  };
-
   const drawInk = (state, spectrum) => {
-    const { context, width, height } = begin(state);
-    const theme = state.theme;
+    const { context, width, height } = clear(state);
     const energy = average(spectrum, 2, 40);
     const centerX = width * 0.5;
-    const centerY = height * 0.54;
-    const radius = Math.min(width, height) * (0.17 + energy * 0.08);
-    drawBackground(state, context, width, height, theme.ink, "rgba(5, 15, 14, 0.34)");
-    const wash = context.createRadialGradient(centerX, centerY, 0, centerX, centerY, width * 0.72);
-    wash.addColorStop(0, "rgba(27, 48, 45, 0.48)");
-    wash.addColorStop(0.58, "rgba(12, 25, 24, 0.26)");
-    wash.addColorStop(1, "rgba(8, 17, 16, 0.42)");
-    context.fillStyle = wash;
-    context.fillRect(0, 0, width, height);
-    context.strokeStyle = "#d9c47c";
-    context.globalAlpha = 0.24 + energy * 0.5;
-    context.lineWidth = 1;
+    const centerY = height * 0.53;
+    const base = Math.min(width, height) * (0.14 + energy * 0.05);
+    context.strokeStyle = palettes["ink-resonance"];
+    context.lineWidth = 1.1;
     for (let ring = 0; ring < 6; ring += 1) {
-      const bin = spectrum[(ring * 6) + 4] / 255;
+      const bin = spectrum[(ring * 5) + 4] / 255;
+      context.globalAlpha = 0.14 + bin * 0.55;
       context.beginPath();
-      context.ellipse(centerX, centerY, radius + ring * 16 + bin * 18, radius * 0.48 + ring * 7 + bin * 9, 0, 0, Math.PI * 2);
+      context.ellipse(centerX, centerY, base + ring * 14 + bin * 14, base * 0.5 + ring * 5 + bin * 7, 0, 0, Math.PI * 2);
       context.stroke();
     }
-    context.globalAlpha = 1;
-    context.fillStyle = "#081211";
-    context.beginPath();
-    context.arc(centerX, centerY, radius, 0, Math.PI * 2);
-    context.fill();
-    context.strokeStyle = theme.gold;
-    context.globalAlpha = 0.72;
-    context.lineWidth = 2;
-    context.beginPath();
-    context.arc(centerX, centerY, radius, 0, Math.PI * 2);
-    context.stroke();
     context.globalAlpha = 1;
   };
 
   const drawMoon = (state, spectrum) => {
-    const { context, width, height } = begin(state);
-    const theme = state.theme;
+    const { context, width, height } = clear(state);
     const energy = average(spectrum, 3, 42);
-    drawBackground(state, context, width, height, theme.paper, "rgba(250, 239, 207, 0.17)");
-    context.strokeStyle = theme.gold;
-    context.shadowColor = "#f6df94";
-    context.shadowBlur = 4 + energy * 16;
-    context.lineWidth = 1.15;
+    context.strokeStyle = palettes["moonlit-strings"];
+    context.shadowColor = "#f6dc8d";
+    context.shadowBlur = 3 + energy * 12;
+    context.lineWidth = 1.05;
     for (let string = 0; string < 7; string += 1) {
-      const y = height * (0.48 + string * 0.055);
-      const amplitude = 3 + (spectrum[(string * 5) + 5] / 255) * (14 + energy * 26);
+      const y = height * (0.43 + string * 0.052);
+      const amplitude = 2 + (spectrum[(string * 5) + 6] / 255) * (11 + energy * 24);
+      context.globalAlpha = 0.2 + (spectrum[(string * 5) + 6] / 255) * 0.78;
       context.beginPath();
-      context.moveTo(-8, y);
-      context.bezierCurveTo(width * 0.31, y - amplitude, width * 0.62, y + amplitude, width + 8, y - amplitude * 0.16);
+      context.moveTo(-6, y);
+      context.bezierCurveTo(width * 0.29, y - amplitude, width * 0.66, y + amplitude, width + 6, y - amplitude * 0.12);
       context.stroke();
     }
+    context.globalAlpha = 1;
     context.shadowBlur = 0;
   };
 
   const drawLandscape = (state, spectrum) => {
-    const { context, width, height } = begin(state);
-    const theme = state.theme;
-    drawBackground(state, context, width, height, theme.ink, "rgba(13, 38, 35, 0.22)");
-    const centerY = height * 0.57;
-    context.strokeStyle = theme.gold;
-    context.shadowColor = "#f5dea0";
-    context.shadowBlur = 7;
-    context.lineWidth = 2;
+    const { context, width, height } = clear(state);
+    const centerY = height * 0.56;
+    context.strokeStyle = palettes["landscape-score"];
+    context.shadowColor = "#f7db86";
+    context.shadowBlur = 6;
+    context.lineWidth = 1.8;
+    context.globalAlpha = 0.84;
     context.beginPath();
     for (let point = 0; point <= 72; point += 1) {
       const value = spectrum[Math.min(spectrum.length - 1, point + 2)] / 255;
       const x = (point / 72) * width;
-      const y = centerY - (value - 0.08) * height * 0.56;
+      const y = centerY - (value - 0.06) * height * 0.5;
       if (point === 0) context.moveTo(x, y);
       else context.lineTo(x, y);
     }
     context.stroke();
+    context.globalAlpha = 1;
     context.shadowBlur = 0;
   };
 
-  const draw = (state, spectrum = emptySpectrum) => {
+  const draw = (state, spectrum) => {
     if (state.artwork === "moonlit-strings") drawMoon(state, spectrum);
     else if (state.artwork === "landscape-score") drawLandscape(state, spectrum);
     else drawInk(state, spectrum);
   };
 
-  const stopAnimation = () => {
-    if (animationFrame) cancelAnimationFrame(animationFrame);
-    animationFrame = undefined;
+  const stopFrame = () => {
+    if (frameRequest) cancelAnimationFrame(frameRequest);
+    frameRequest = undefined;
   };
 
   const render = () => {
     if (!activeState || activeState.audio.paused || activeState.audio.ended) {
-      stopAnimation();
+      stopFrame();
       return;
     }
     activeState.analyser.getByteFrequencyData(activeState.spectrum);
     draw(activeState, activeState.spectrum);
-    animationFrame = requestAnimationFrame(render);
+    frameRequest = requestAnimationFrame(render);
   };
 
-  const connectAnalyser = (state) => {
+  const connect = (state) => {
     if (!window.AudioContext && !window.webkitAudioContext) return false;
     if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
     if (state.analyser) return true;
@@ -171,16 +136,16 @@
     states.forEach((otherState) => {
       if (otherState === state) return;
       otherState.audio.pause();
-      draw(otherState);
+      clear(otherState);
     });
-    if (!connectAnalyser(state)) return;
+    if (!connect(state)) return;
     try {
       await audioContext.resume();
     } catch (_) {
       return;
     }
     activeState = state;
-    stopAnimation();
+    stopFrame();
     render();
   };
 
@@ -189,25 +154,18 @@
     const audio = card?.querySelector("audio");
     const context = canvas.getContext("2d");
     if (!audio || !context) return;
-    const background = new Image();
-    background.decoding = "async";
-    const state = { canvas, audio, context, artwork: canvas.dataset.artwork, theme: themes[canvas.dataset.artwork] || themes["ink-resonance"], background };
+    const state = { canvas, audio, context, artwork: canvas.dataset.artwork };
     states.push(state);
-    draw(state);
-    if (canvas.dataset.background) {
-      background.addEventListener("load", () => draw(state));
-      background.src = canvas.dataset.background;
-    }
+    clear(state);
     audio.addEventListener("play", () => { void activate(state); });
     audio.addEventListener("pause", () => {
-      if (activeState !== state) return;
-      activeState = undefined;
-      stopAnimation();
-      draw(state);
+      if (activeState === state) activeState = undefined;
+      stopFrame();
+      clear(state);
     });
-    audio.addEventListener("ended", () => draw(state));
-    if (window.ResizeObserver) new ResizeObserver(() => draw(state)).observe(canvas);
-    else window.addEventListener("resize", () => draw(state));
+    audio.addEventListener("ended", () => clear(state));
+    if (window.ResizeObserver) new ResizeObserver(() => clear(state)).observe(canvas);
+    else window.addEventListener("resize", () => clear(state));
   };
 
   document.querySelectorAll(".anonymous-visualizer").forEach(attach);

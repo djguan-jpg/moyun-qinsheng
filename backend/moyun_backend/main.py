@@ -222,7 +222,8 @@ def page(title: str, body: str, *, status_code: int = 200) -> HTMLResponse:
 <title>{html.escape(title)}｜古韻新生</title>
 <style>
   .anonymous-art {{ height:190px; overflow:hidden; margin:-20px -20px 18px; background:#1c312a; }}
-  .anonymous-art canvas {{ display:block; width:100%; height:100%; }}
+  .anonymous-art img {{ display:block; width:100%; height:100%; object-fit:cover; }}
+  .anonymous-art {{ position:relative; }} .anonymous-art canvas {{ position:absolute; inset:0; display:block; width:100%; height:100%; pointer-events:none; }}
   :root {{ color-scheme: light; font-family: "Noto Serif TC", "Microsoft JhengHei", serif; color: #19302c; background:#f5f2e9; }}
   body {{ margin:0; min-height:100vh; display:grid; place-items:center; background:radial-gradient(circle at top right,#d9e3dc,transparent 38%),#f5f2e9; }}
   main {{ width:min(680px,calc(100% - 40px)); margin:40px 20px; padding:36px; background:#fffdf8; border:1px solid #d8d1c3; box-shadow:0 16px 45px #23362a20; }}
@@ -339,14 +340,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             audio_type = html.escape(work["audio_content_type"] or "audio/mpeg")
             artwork_keys = tuple(ANONYMOUS_ARTWORKS)
             artwork_key = artwork_keys[(work["id"] - 1) % len(artwork_keys)]
-            artwork_url = public_path(settings, "/art/" + artwork_key + "?v=canvas-artwork-20260825")
+            artwork_url = public_path(settings, "/art/" + artwork_key + "?v=canvas-artwork-20260825-v2")
             if settings.public_reveal_work_metadata:
                 metadata = f"""<p class="eyebrow">匿名作品 #{work['id']:03d}・{html.escape(work['category'])}</p>
 <h2>{html.escape(work['work_title'])}</h2><p class="muted">{html.escape(work['description'])}</p>"""
             else:
                 metadata = f"""<p class="eyebrow">ANONYMOUS ENTRY</p>
 <h2>匿名作品 #{work['id']:03d}</h2><p class="muted">歌名與創作理念將於主辦單位公告後統一公開。</p>"""
-            return f"""<article class="work"><div class="anonymous-art" aria-hidden="true"><canvas class="anonymous-visualizer" data-artwork="{artwork_key}" data-background="{artwork_url}"></canvas></div>{metadata}
+            return f"""<article class="work"><div class="anonymous-art" aria-hidden="true"><img src="{artwork_url}" alt=""><canvas class="anonymous-visualizer" data-artwork="{artwork_key}"></canvas></div>{metadata}
 <audio controls preload="metadata"><source src="{audio_source}" type="{audio_type}">你的瀏覽器不支援音檔播放。</audio></article>"""
 
         cards = "".join(
