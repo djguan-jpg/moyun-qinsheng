@@ -2,12 +2,17 @@
   "use strict";
 
   // The three source artworks remain untouched underneath this transparent
-  // canvas. A canvas has no resting artwork of its own: every visible facet
-  // is derived from the currently playing audio.
+  // canvas. While paused the canvas is empty; during playback the audio's
+  // waveform lifts one soft, continuous silk-like veil over the image.
   const palettes = {
-    "ink-resonance": ["#70d8d1", "#ff8977"],
-    "moonlit-strings": ["#91a8ff", "#d8c4ff"],
-    "landscape-score": ["#55c7a5", "#ff9c7a"],
+    "ink-resonance": ["#71c9bf", "#e7a197"],
+    "moonlit-strings": ["#aebbe7", "#d7c7df"],
+    "landscape-score": ["#82bbaa", "#ddb09f"],
+  };
+  const compositions = {
+    "ink-resonance": { center: 0.54, slope: -0.035, thickness: 0.085, amplitude: 0.1, echo: 0.11 },
+    "moonlit-strings": { center: 0.51, slope: 0.075, thickness: 0.072, amplitude: 0.082, echo: -0.105 },
+    "landscape-score": { center: 0.56, slope: -0.055, thickness: 0.078, amplitude: 0.088, echo: 0.095 },
   };
   const states = [];
   let audioContext;
@@ -50,98 +55,118 @@
   const level = (state, spectrum, slot, index, spread = 2) => {
     const next = band(spectrum, index, spread);
     const previous = state.levels[slot] ?? next;
-    const smoothed = previous * 0.76 + next * 0.24;
+    const smoothed = previous * 0.82 + next * 0.18;
     state.levels[slot] = smoothed;
     return smoothed;
   };
 
-  const fillFacet = (context, points, color, alpha) => {
+  const waveformAt = (waveform, progress) => {
+    const center = Math.round(progress * (waveform.length - 1));
+    let total = 0;
+    let count = 0;
+    for (let offset = -2; offset <= 2; offset += 1) {
+      const index = Math.max(0, Math.min(waveform.length - 1, center + offset));
+      total += (waveform[index] - 128) / 128;
+      count += 1;
+    }
+    return total / count;
+  };
+
+  const rgba = (hex, alpha) => {
+    const value = hex.slice(1);
+    const red = Number.parseInt(value.slice(0, 2), 16);
+    const green = Number.parseInt(value.slice(2, 4), 16);
+    const blue = Number.parseInt(value.slice(4, 6), 16);
+    return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+  };
+
+  const smoothPath = (context, points, move = true) => {
+    const first = points[0];
+    if (move) context.moveTo(first.x, first.y);
+    else context.lineTo(first.x, first.y);
+    for (let index = 1; index < points.length - 1; index += 1) {
+      const current = points[index];
+      const next = points[index + 1];
+      context.quadraticCurveTo(current.x, current.y, (current.x + next.x) * 0.5, (current.y + next.y) * 0.5);
+    }
+    const last = points[points.length - 1];
+    context.lineTo(last.x, last.y);
+  };
+
+  const fillSilkBand = (context, geometry, colors, alpha) => {
+    const gradient = context.createLinearGradient(0, 0, geometry.width, geometry.height);
+    gradient.addColorStop(0, rgba(colors[0], 0));
+    gradient.addColorStop(0.24, rgba(colors[0], 0.72));
+    gradient.addColorStop(0.58, rgba(colors[1], 0.68));
+    gradient.addColorStop(1, rgba(colors[1], 0));
     context.save();
     context.globalAlpha = alpha;
-    context.fillStyle = color;
+    context.globalCompositeOperation = "screen";
+    context.fillStyle = gradient;
+    context.shadowColor = rgba(colors[0], 0.3);
+    context.shadowBlur = Math.max(8, geometry.height * 0.045);
     context.beginPath();
-    context.moveTo(points[0].x, points[0].y);
-    points.slice(1).forEach((point) => context.lineTo(point.x, point.y));
+    smoothPath(context, geometry.upper);
+    const lower = [...geometry.lower].reverse();
+    smoothPath(context, lower, false);
     context.closePath();
     context.fill();
     context.restore();
   };
 
-  // 折聲窗：audio opens a set of central, translucent folding panels.
-  const drawFoldingWindows = (state, spectrum, colors) => {
-    const { context, width, height } = clear(state);
-    const bass = level(state, spectrum, 0, 6, 4);
-    for (let index = 0; index < 3; index += 1) {
-      const energy = level(state, spectrum, 1 + index, 19 + index * 13, 4);
-      const centerX = width * 0.5;
-      const gap = width * (0.018 + index * 0.052);
-      const reach = width * (0.075 + index * 0.035 + energy * 0.055);
-      const halfHeight = height * (0.14 + index * 0.055 + energy * 0.14 + bass * 0.06);
-      const lean = height * (0.028 + energy * 0.09);
-      const top = height * 0.5 - halfHeight;
-      const bottom = height * 0.5 + halfHeight;
-      const alpha = 0.1 + energy * 0.25;
-      fillFacet(context, [
-        { x: centerX - gap, y: top + lean },
-        { x: centerX - gap - reach, y: top },
-        { x: centerX - gap - reach * 0.66, y: bottom - lean },
-        { x: centerX - gap, y: bottom },
-      ], colors[index % 2], alpha);
-      fillFacet(context, [
-        { x: centerX + gap, y: top },
-        { x: centerX + gap + reach, y: top + lean },
-        { x: centerX + gap + reach * 0.66, y: bottom },
-        { x: centerX + gap, y: bottom - lean },
-      ], colors[(index + 1) % 2], alpha);
+  const silkGeometry = (state, waveform, options) => {
+    const { width, height } = state;
+    const upper = [];
+    const lower = [];
+    const samples = 34;
+    for (let index = 0; index <= samples; index += 1) {
+      const progress = index / samples;
+      const waveformLift = waveformAt(waveform, progress) * options.amplitude;
+      const slowLift = Math.sin(progress * Math.PI * 2 + options.phase) * options.drift;
+      const center = height * (
+        options.center
+        + options.slope * (progress - 0.5)
+        + waveformLift
+        + slowLift
+      );
+      const taper = 0.34 + Math.sin(progress * Math.PI) * 0.66;
+      const half = height * options.thickness * taper;
+      upper.push({ x: width * progress, y: center - half });
+      lower.push({ x: width * progress, y: center + half });
     }
+    return { width, height, upper, lower };
   };
 
-  // 旋頁：a small set of broad facets pivots around the sound's midrange.
-  const drawTurningPages = (state, spectrum, colors) => {
-    const { context, width, height } = clear(state);
-    const centerX = width * 0.5;
-    const centerY = height * 0.52;
-    for (let index = 0; index < 4; index += 1) {
-      const energy = level(state, spectrum, 8 + index, 40 + index * 15, 5);
-      const rise = level(state, spectrum, 12 + index, 12 + index * 8, 3);
-      const span = width * (0.12 + index * 0.042 + energy * 0.08);
-      const depth = height * (0.075 + energy * 0.17);
-      const shift = height * (index - 1.5) * 0.055;
-      const tilt = height * (rise - 0.5) * 0.13;
-      fillFacet(context, [
-        { x: centerX - span, y: centerY + shift - tilt },
-        { x: centerX + span * 0.16, y: centerY + shift - depth },
-        { x: centerX + span, y: centerY + shift + tilt },
-        { x: centerX - span * 0.16, y: centerY + shift + depth },
-      ], colors[index % 2], 0.11 + energy * 0.27);
-    }
-  };
+  const drawSoundVeil = (state, spectrum, waveform) => {
+    const { context } = clear(state);
+    const bass = level(state, spectrum, 0, 7, 5);
+    const mid = level(state, spectrum, 1, 34, 9);
+    const treble = level(state, spectrum, 2, 78, 12);
+    const activity = Math.min(1, Math.max(0, (bass * 0.48 + mid * 0.38 + treble * 0.14 - 0.018) * 3.1));
+    if (activity < 0.018) return;
 
-  // 層台：offset planes expand and contract at independent frequency bands.
-  const drawLayeredStages = (state, spectrum, colors) => {
-    const { context, width, height } = clear(state);
-    for (let index = 0; index < 4; index += 1) {
-      const energy = level(state, spectrum, 16 + index, 73 + index * 12, 5);
-      const pulse = level(state, spectrum, 20 + index, 8 + index * 6, 3);
-      const y = height * (0.34 + index * 0.105);
-      const left = width * (0.14 + index * 0.052 - energy * 0.035);
-      const right = width * (0.86 - index * 0.052 + energy * 0.035);
-      const depth = height * (0.045 + energy * 0.11);
-      const skew = width * (pulse - 0.5) * 0.075;
-      fillFacet(context, [
-        { x: left + skew, y },
-        { x: right + skew, y: y + depth * 0.38 },
-        { x: right - skew * 0.45, y: y + depth },
-        { x: left - skew * 0.45, y: y + depth * 0.62 },
-      ], colors[index % 2], 0.1 + energy * 0.25);
-    }
-  };
-
-  const draw = (state, spectrum) => {
     const colors = palettes[state.artwork] || palettes["ink-resonance"];
-    if (state.artwork === "moonlit-strings") drawTurningPages(state, spectrum, colors);
-    else if (state.artwork === "landscape-score") drawLayeredStages(state, spectrum, colors);
-    else drawFoldingWindows(state, spectrum, colors);
+    const composition = compositions[state.artwork] || compositions["ink-resonance"];
+    const phase = state.audio.currentTime * (0.72 + treble * 0.5);
+    const primary = silkGeometry(state, waveform, {
+      center: composition.center,
+      slope: composition.slope,
+      thickness: composition.thickness * (0.72 + bass * 0.58),
+      amplitude: composition.amplitude * (0.38 + mid * 1.25),
+      drift: activity * 0.012,
+      phase,
+    });
+    fillSilkBand(context, primary, colors, 0.055 + activity * 0.16);
+
+    const echo = silkGeometry(state, waveform, {
+      center: composition.center + composition.echo,
+      slope: -composition.slope * 0.65,
+      thickness: composition.thickness * (0.34 + treble * 0.28),
+      amplitude: composition.amplitude * (0.16 + treble * 0.45),
+      drift: activity * 0.008,
+      phase: phase + 1.8,
+    });
+    fillSilkBand(context, echo, [colors[1], colors[0]], 0.025 + activity * 0.07);
   };
 
   const stopFrame = () => {
@@ -155,7 +180,8 @@
       return;
     }
     activeState.analyser.getByteFrequencyData(activeState.spectrum);
-    draw(activeState, activeState.spectrum);
+    activeState.analyser.getByteTimeDomainData(activeState.waveform);
+    drawSoundVeil(activeState, activeState.spectrum, activeState.waveform);
     frameRequest = requestAnimationFrame(render);
   };
 
@@ -165,8 +191,9 @@
     if (state.analyser) return true;
     state.analyser = audioContext.createAnalyser();
     state.analyser.fftSize = 256;
-    state.analyser.smoothingTimeConstant = 0.76;
+    state.analyser.smoothingTimeConstant = 0.82;
     state.spectrum = new Uint8Array(state.analyser.frequencyBinCount);
+    state.waveform = new Uint8Array(state.analyser.fftSize);
     const source = audioContext.createMediaElementSource(state.audio);
     source.connect(state.analyser);
     state.analyser.connect(audioContext.destination);

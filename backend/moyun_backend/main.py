@@ -362,7 +362,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         body = f"""
 <p class="eyebrow">PUBLIC LISTENING GALLERY</p><h1>公開作品展演</h1>
 <p>{gallery_description}</p><div class="gallery-grid">{cards}</div>
-<script src="{public_path(settings, '/anonymous-visualizer.js')}" defer></script>"""
+<script src="{public_path(settings, '/anonymous-visualizer.js')}?v=silk-20260826" defer></script>"""
         return page("公開作品展演", body)
 
     @app.get("/media/{audio_filename}")
