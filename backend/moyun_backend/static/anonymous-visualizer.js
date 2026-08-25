@@ -2,7 +2,7 @@
   "use strict";
 
   // The artwork is deliberately separate from this transparent canvas. These
-  // are responsive gilded "inscription marks", not an ink-flow, glow, or
+  // are responsive gilded sound threads, not an ink-flow, glow, or
   // conventional spectrum-bar treatment.
   const palettes = {
     "ink-resonance": "#e7ca73",
@@ -49,84 +49,76 @@
     return { context, width, height };
   };
 
-  const inscription = (context, x, y, angle, length, strength, color, thickness = 1) => {
-    const alpha = 0.1 + strength * 0.82;
+  const level = (state, spectrum, slot, index) => {
+    const next = band(spectrum, index);
+    const previous = state.levels[slot] ?? next;
+    const smoothed = previous * 0.79 + next * 0.21;
+    state.levels[slot] = smoothed;
+    return smoothed;
+  };
+
+  const strokeThread = (context, points, color, alpha, width) => {
     context.save();
-    context.translate(x, y);
-    context.rotate(angle);
     context.globalAlpha = alpha;
     context.strokeStyle = color;
-    context.lineWidth = thickness + strength * 0.9;
+    context.lineWidth = width;
     context.beginPath();
-    context.moveTo(-length * 0.5, 0);
-    context.lineTo(length * 0.5, 0);
-    context.stroke();
-    // A short counter-mark makes each segment a carved music glyph rather
-    // than a conventional equalizer bar.
-    context.globalAlpha = alpha * 0.72;
-    context.lineWidth = Math.max(0.8, thickness * 0.72);
-    context.beginPath();
-    context.moveTo(length * 0.2, -3 - strength * 3);
-    context.lineTo(length * 0.2, 3 + strength * 3);
+    context.moveTo(points[0].x, points[0].y);
+    for (let index = 1; index < points.length - 1; index += 1) {
+      const current = points[index];
+      const next = points[index + 1];
+      context.quadraticCurveTo(current.x, current.y, (current.x + next.x) * 0.5, (current.y + next.y) * 0.5);
+    }
+    const last = points[points.length - 1];
+    context.lineTo(last.x, last.y);
     context.stroke();
     context.restore();
   };
 
-  // 墨韻共鳴：central "bronze-inscription seal" strokes suspended in the
-  // dark well of the image. The phrase fans outward with the musical bands.
+  const threadPoints = (state, spectrum, slotOffset, count, pointAt) => (
+    Array.from({ length: count }, (_, index) => pointAt(index / (count - 1), level(state, spectrum, slotOffset + index, 3 + index * 5)))
+  );
+
+  // 墨韻共鳴：three restrained seal-like threads in the dark centre. They
+  // breathe with the music without becoming marks, crosses, or particle dots.
   const drawInk = (state, spectrum) => {
     const { context, width, height } = clear(state);
     const energy = average(spectrum, 2, 44);
-    const centerX = width * 0.5;
-    const centerY = height * 0.54;
-    const scale = Math.min(width, height);
-    for (let mark = 0; mark < 15; mark += 1) {
-      const strength = band(spectrum, 4 + mark * 5);
-      const row = Math.floor(mark / 5);
-      const column = mark % 5;
-      const x = centerX + (column - 2) * scale * 0.075 + row * scale * 0.008;
-      const y = centerY + (row - 1) * scale * 0.105 + (column - 2) * scale * 0.016;
-      const angle = -0.28 + row * 0.14 + (column - 2) * 0.08;
-      const length = scale * (0.035 + strength * 0.065 + energy * 0.018);
-      inscription(context, x, y, angle, length, strength, palettes["ink-resonance"], 0.9);
+    for (let lane = 0; lane < 3; lane += 1) {
+      const baseY = height * (0.45 + lane * 0.075);
+      const points = threadPoints(state, spectrum, lane * 28, 25, (progress, strength) => ({
+        x: width * (0.29 + progress * 0.42),
+        y: baseY + Math.sin(progress * Math.PI * 1.2 + lane * 0.55) * height * 0.021 - strength * height * (0.035 + energy * 0.03),
+      }));
+      strokeThread(context, points, palettes["ink-resonance"], 0.22 + energy * 0.36, 0.85 + lane * 0.12);
     }
   };
 
-  // 月下琴弦：a crescent-shaped run of plucked score marks, deliberately not
-  // full-width strings or a light halo. Each glyph answers a different band.
+  // 月下琴弦：short, fine qin strings in the open sky. Each line moves as one
+  // whole thread, rather than breaking into isolated visualizer symbols.
   const drawMoon = (state, spectrum) => {
     const { context, width, height } = clear(state);
-    const centerX = width * 0.54;
-    const centerY = height * 0.56;
-    const radiusX = width * 0.25;
-    const radiusY = height * 0.17;
-    for (let mark = 0; mark < 13; mark += 1) {
-      const strength = band(spectrum, 7 + mark * 6);
-      const progress = mark / 12;
-      const theta = Math.PI * (0.18 + progress * 0.72);
-      const x = centerX + Math.cos(theta) * radiusX;
-      const y = centerY + Math.sin(theta) * radiusY;
-      const tangent = theta + Math.PI * 0.5;
-      const length = Math.min(width, height) * (0.038 + strength * 0.052);
-      inscription(context, x, y, tangent, length, strength, palettes["moonlit-strings"], 0.85);
+    const energy = average(spectrum, 3, 46);
+    for (let string = 0; string < 5; string += 1) {
+      const baseY = height * (0.47 + string * 0.06);
+      const points = threadPoints(state, spectrum, 90 + string * 28, 25, (progress, strength) => ({
+        x: width * (0.26 + progress * 0.53),
+        y: baseY + Math.sin(progress * Math.PI) * (height * 0.007 + strength * height * (0.038 + energy * 0.025)),
+      }));
+      strokeThread(context, points, palettes["moonlit-strings"], 0.2 + energy * 0.38, 0.72 + string * 0.08);
     }
   };
 
-  // 山水聲譜：a broken gold route that crosses the valley. Sound changes the
-  // weight of consecutive route-glyphs instead of drawing a waveform.
+  // 山水聲譜：one unbroken gold thread following a gentle mountain pass. It is
+  // continuous on purpose: a visual line for the score, never a flight path.
   const drawLandscape = (state, spectrum) => {
     const { context, width, height } = clear(state);
     const energy = average(spectrum, 2, 50);
-    const points = 17;
-    for (let mark = 0; mark < points; mark += 1) {
-      const progress = mark / (points - 1);
-      const strength = band(spectrum, 3 + mark * 6);
-      const x = width * (0.16 + progress * 0.68);
-      const y = height * (0.59 - Math.sin(progress * Math.PI) * 0.13 + (progress - 0.5) * 0.06);
-      const angle = -0.21 + Math.cos(progress * Math.PI) * 0.2;
-      const length = Math.min(width, height) * (0.026 + strength * 0.052 + energy * 0.012);
-      inscription(context, x, y, angle, length, strength, palettes["landscape-score"], 0.9);
-    }
+    const points = threadPoints(state, spectrum, 230, 37, (progress, strength) => ({
+      x: width * (0.13 + progress * 0.74),
+      y: height * (0.59 - Math.sin(progress * Math.PI) * 0.105 + (progress - 0.5) * 0.028) - strength * height * (0.035 + energy * 0.028),
+    }));
+    strokeThread(context, points, palettes["landscape-score"], 0.36 + energy * 0.42, 1.15 + energy * 0.7);
   };
 
   const draw = (state, spectrum) => {
@@ -186,7 +178,7 @@
     const audio = card?.querySelector("audio");
     const context = canvas.getContext("2d");
     if (!audio || !context) return;
-    const state = { canvas, audio, context, artwork: canvas.dataset.artwork };
+    const state = { canvas, audio, context, artwork: canvas.dataset.artwork, levels: [] };
     states.push(state);
     clear(state);
     audio.addEventListener("play", () => { void activate(state); });
