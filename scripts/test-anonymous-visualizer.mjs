@@ -5,7 +5,7 @@ import vm from "node:vm";
 
 const source = readFileSync(new URL("../backend/moyun_backend/static/anonymous-visualizer.js", import.meta.url), "utf8");
 
-function harness({ unavailable = false, deferred = false } = {}) {
+function harness({ unavailable = false, deferred = false, reduced = false, seed = 8127 } = {}) {
   const frames = new Map();
   const pending = [];
   const events = {};
@@ -14,11 +14,14 @@ function harness({ unavailable = false, deferred = false } = {}) {
   let stamps = 0;
   const signal = { amplitude: 45, frequency: 140 };
   const context = () => ({
-    marks: [], globalAlpha: 1,
+    marks: [], globalAlpha: 1, tx: 0, ty: 0, stack: [],
     setTransform() {}, clearRect() { this.marks = []; },
+    save() { this.stack.push([this.tx, this.ty, this.globalAlpha]); },
+    restore() { [this.tx, this.ty, this.globalAlpha] = this.stack.pop(); },
+    translate(x, y) { this.tx += x; this.ty += y; }, rotate() {},
     createRadialGradient() { return { addColorStop() {} }; },
     beginPath() {}, moveTo() {}, quadraticCurveTo() {}, closePath() {}, fill() {}, fillRect() {},
-    drawImage(stamp, ...geometry) { this.marks.push({ alpha: this.globalAlpha, geometry }); },
+    drawImage(stamp, ...geometry) { this.marks.push({ alpha: this.globalAlpha, geometry, center: [this.tx, this.ty] }); },
   });
   const audios = Array.from({ length: 3 }, () => ({
     paused: true, ended: false, muted: false, volume: 1, currentTime: 0, events: {},
@@ -48,9 +51,11 @@ function harness({ unavailable = false, deferred = false } = {}) {
     addEventListener(name, callback) { events[name] = callback; },
     createElement() { stamps++; return { getContext: () => context() }; },
   };
+  const seededMath = Object.create(Math);
+  seededMath.random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
   const sandbox = {
-    document, Uint8Array, Math,
-    window: { devicePixelRatio: 3, matchMedia: () => ({ matches: false }),
+    document, Uint8Array, Math: seededMath,
+    window: { devicePixelRatio: 3, matchMedia: () => ({ matches: reduced }),
       AudioContext: unavailable ? undefined : AudioContext, ResizeObserver: class { observe() {} },
     },
     ResizeObserver: class { observe() {} },
@@ -81,18 +86,17 @@ test("idle canvases are empty and pigment textures are lazy, with bounded DPR", 
 test("real waveform amplitude and frequency alter ink density and expansion", async () => {
   const h = harness(); h.signal.amplitude = 6; h.signal.frequency = 25;
   await h.play(); h.tick();
-  const soft = h.canvases[0].context.marks[0];
+  const soft = Math.max(...h.canvases[0].context.marks.map(m => m.alpha));
   h.signal.amplitude = 45; h.signal.frequency = 180; h.tick();
-  const loud = h.canvases[0].context.marks[0];
-  assert.ok(loud.alpha > soft.alpha);
-  assert.ok(loud.geometry[2] > soft.geometry[2]);
-  assert.equal(h.stamps, 4, "stamps must not be regenerated each frame");
+  const loud = Math.max(...h.canvases[0].context.marks.map(m => m.alpha));
+  assert.ok(loud > soft);
+  assert.equal(h.stamps, 8, "stamps must not be regenerated each frame");
   assert.equal(h.frames.size, 1);
 });
 
 test("silence, mute and pause clear all pigment immediately", async () => {
   const h = harness(); await h.play(); h.tick();
-  assert.equal(h.canvases[0].context.marks.length, 4);
+  assert.ok(h.canvases[0].context.marks.length > 0);
   h.signal.amplitude = 0; h.tick(1);
   assert.equal(h.canvases[0].context.marks.length, 0, "stale frequency data cannot animate silence");
   h.signal.amplitude = 45; h.tick();
@@ -108,7 +112,7 @@ test("only one work plays; switching and replay reuse the audio graph", async ()
   await h.play(1); h.tick();
   assert.equal(h.audios[0].paused, true);
   assert.equal(h.canvases[0].context.marks.length, 0);
-  assert.equal(h.canvases[1].context.marks.length, 4);
+  assert.ok(h.canvases[1].context.marks.length > 0);
   h.audios[1].pause(); await h.play(1); h.tick();
   assert.equal(h.sources, 2);
   assert.equal(h.frames.size, 1);
@@ -132,7 +136,7 @@ test("a slow AudioContext resume cannot reactivate a previous work", async () =>
   h.pending[1](); await h.flush(); h.tick();
   h.pending[0](); await h.flush(); h.tick();
   assert.equal(h.canvases[0].context.marks.length, 0);
-  assert.equal(h.canvases[1].context.marks.length, 4);
+  assert.ok(h.canvases[1].context.marks.length > 0);
   assert.equal(h.frames.size, 1);
 });
 
@@ -141,4 +145,51 @@ test("unsupported Web Audio leaves native playback running with a clear canvas",
   assert.equal(h.audios[0].paused, false);
   assert.equal(h.frames.size, 0);
   assert.equal(h.canvases[0].context.marks.length, 0);
+});
+
+test("ink heads actually travel across the canvas, not just grow at a fixed centre", async () => {
+  const h = harness(); await h.play();
+  const headPositions = [];
+  for (let frame = 0; frame < 600; frame++) {
+    h.tick(1);
+    const marks = h.canvases[0].context.marks;
+    if (marks.length >= 3) headPositions.push(marks.at(-3).center);
+    assert.ok(marks.length <= 96, "trail count must stay bounded on phones");
+  }
+  const span = axis => Math.max(...headPositions.map(p => p[axis])) - Math.min(...headPositions.map(p => p[axis]));
+  assert.ok(span(0) > 120, `horizontal travel was only ${span(0)}px`);
+  assert.ok(span(1) > 45, `vertical travel was only ${span(1)}px`);
+});
+
+test("separate sessions take different random routes", async () => {
+  const a = harness({ seed: 123 }); const b = harness({ seed: 456 });
+  await a.play(); await b.play(); a.tick(120); b.tick(120);
+  assert.notDeepEqual(a.canvases[0].context.marks.at(-3).center, b.canvases[0].context.marks.at(-3).center);
+});
+
+test("frequency response changes travel and width at equal loudness", async () => {
+  const low = harness(); const high = harness();
+  low.signal.frequency = 15; high.signal.frequency = 220;
+  await low.play(); await high.play(); low.tick(120); high.tick(120);
+  const a = low.canvases[0].context.marks.at(-3);
+  const b = high.canvases[0].context.marks.at(-3);
+  assert.ok(b.geometry[2] > a.geometry[2]);
+  assert.notDeepEqual(a.center, b.center);
+});
+
+test("reduced-motion preference suppresses spatial travel", async () => {
+  const h = harness({ reduced: true }); await h.play(); h.tick(30);
+  const first = h.canvases[0].context.marks.at(-3).center;
+  h.tick(300);
+  assert.deepEqual(h.canvases[0].context.marks.at(-3).center, first);
+});
+
+test("silent playback cannot advance the random path", async () => {
+  const h = harness(); await h.play(); h.tick(60);
+  const before = h.canvases[0].context.marks.at(-3).center;
+  h.signal.amplitude = 0; h.tick(300);
+  assert.equal(h.canvases[0].context.marks.length, 0);
+  h.signal.amplitude = 45; h.tick(6);
+  const after = h.canvases[0].context.marks.at(-3).center;
+  assert.ok(Math.hypot(after[0] - before[0], after[1] - before[1]) < 15);
 });

@@ -8,11 +8,11 @@
     "moonlit-strings": ["#355568", "#576f68", "#a18460", "#303b3b"],
     "landscape-score": ["#436b67", "#718b6a", "#9b7952", "#344a50"],
   };
-  // Overlapping washes in negative space, clear of the moon and foreground.
-  const compositions = {
-    "ink-resonance": [[.43, .49, .25, .83], [.57, .54, .22, .94], [.52, .64, .14, .71], [.39, .58, .16, .69]],
-    "moonlit-strings": [[.42, .44, .23, .69], [.58, .48, .20, .79], [.52, .57, .14, .62], [.35, .50, .14, .74]],
-    "landscape-score": [[.40, .49, .23, .68], [.56, .52, .22, .78], [.61, .59, .13, .67], [.35, .56, .15, .71]],
+  // Broad travel regions, not fixed centres. Keep the moon itself unobscured.
+  const motionBounds = {
+    "ink-resonance": [.10, .90, .18, .84],
+    "moonlit-strings": [.08, .92, .30, .80],
+    "landscape-score": [.08, .92, .20, .82],
   };
   const states = [];
   const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)");
@@ -53,7 +53,8 @@
 
   const reset = (state) => {
     state.energy = 0;
-    state.wetness = 0;
+    state.currents = undefined;
+    state.parcels = [];
     state.lastTime = undefined;
     clear(state);
   };
@@ -112,12 +113,90 @@
     return stamp;
   };
 
+  const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+  const randomPoint = (state) => {
+    const [left, right, top, bottom] = state.bounds;
+    return { x: left + state.random() * (right - left), y: top + state.random() * (bottom - top) };
+  };
+
+  const newRoute = (state, current) => {
+    const from = { x: current.x, y: current.y };
+    let to = randomPoint(state);
+    // Reject nearby destinations: "random motion" must not become local wobble.
+    for (let attempt = 0; attempt < 16; attempt += 1) {
+      const candidate = randomPoint(state);
+      if (Math.hypot(candidate.x - from.x, candidate.y - from.y)
+        > Math.hypot(to.x - from.x, to.y - from.y)) to = candidate;
+      if (Math.hypot(to.x - from.x, to.y - from.y) > .48) break;
+    }
+    const [left, right, top, bottom] = state.bounds;
+    const first = current.route ? {
+      x: clamp(from.x + (from.x - current.route.second.x) * .8, left, right),
+      y: clamp(from.y + (from.y - current.route.second.y) * .8, top, bottom),
+    } : randomPoint(state);
+    current.route = { from, first, second: randomPoint(state), to };
+    current.progress = 0;
+    current.duration = 2.2 + state.random() * 1.4;
+  };
+
+  const createCurrent = (state, index) => {
+    const current = { ...randomPoint(state), index, emission: .09 };
+    newRoute(state, current);
+    return current;
+  };
+
+  const routePoint = (route, progress) => {
+    const t = clamp(progress, 0, 1);
+    const u = 1 - t;
+    const point = {};
+    for (const axis of ["x", "y"]) point[axis] = u ** 3 * route.from[axis]
+      + 3 * u ** 2 * t * route.first[axis] + 3 * u * t ** 2 * route.second[axis]
+      + t ** 3 * route.to[axis];
+    return point;
+  };
+
+  const advanceInk = (state, delta, bands) => {
+    const motion = reducedMotion?.matches ? 0 : 1;
+    if (!state.currents) state.currents = [0, 1, 2].map(index => createCurrent(state, index));
+    for (const parcel of state.parcels) {
+      parcel.age += delta;
+      parcel.x += parcel.vx * delta * motion;
+      parcel.y += parcel.vy * delta * motion;
+      parcel.angle += parcel.spin * delta * motion;
+    }
+    state.parcels = state.parcels.filter(parcel => parcel.age < parcel.life);
+    for (const current of state.currents) {
+      const previous = { x: current.x, y: current.y };
+      const response = bands[current.index];
+      current.progress += delta * (.45 + state.energy * 1.2 + response * .35) / current.duration * motion;
+      Object.assign(current, routePoint(current.route, current.progress));
+      if (current.progress >= 1) newRoute(state, current);
+      current.emission += delta;
+      if (current.emission < .09) continue;
+      current.emission %= .09;
+      const pigment = current.index === 2 && state.random() < .65 ? 3 : current.index;
+      state.parcels.push({
+        x: current.x, y: current.y, age: 0, life: 1.6 + state.random() * 1.2,
+        vx: delta ? (current.x - previous.x) / delta * .12 : 0,
+        vy: delta ? (current.y - previous.y) / delta * .12 : 0,
+        angle: state.random() * Math.PI * 2, spin: (state.random() - .5) * .65,
+        radius: .055 + state.random() * .045 + response * .024,
+        aspect: .72 + state.random() * .55,
+        opacity: (pigment === 2 ? .12 : .29) * (.55 + state.energy * .45),
+        stamp: pigment * 2 + Math.floor(state.random() * 2),
+      });
+    }
+    // A finite number of large translucent wisps, not point particles.
+    if (state.parcels.length > 96) state.parcels.splice(0, state.parcels.length - 96);
+  };
+
   const drawInkBloom = (state) => {
     clear(state);
     const amplitude = rms(state.waveform);
     // Smoothed frequency bins must never create fake movement during silence.
     if (amplitude < .003 || state.audio.muted || state.audio.volume === 0) {
       state.energy = 0;
+      state.parcels = [];
       state.lastTime = state.audio.currentTime;
       return;
     }
@@ -127,25 +206,23 @@
     const signal = Math.min(1, amplitude * state.audio.volume * 7);
     const follow = 1 - Math.exp(-delta * (signal > state.energy ? 9 : 3));
     state.energy += (signal - state.energy) * follow;
-    // Diffusion advances only with integrated sound energy, not wall-clock time.
-    state.wetness += delta * state.energy * .36;
     const bass = average(state.spectrum, 1, 7);
     const mid = average(state.spectrum, 7, 32);
     const high = average(state.spectrum, 32, 100);
-    const bands = [bass, mid, high, (bass + mid) * .5];
-    const composition = compositions[state.artwork] || compositions["ink-resonance"];
-    const movement = reducedMotion?.matches ? 0 : 1;
+    const bands = [bass, mid, high];
+    if (state.energy < .005) return;
+    advanceInk(state, delta, bands);
     const { context, width, height } = state;
     context.globalCompositeOperation = "source-over";
-    composition.forEach(([x, y, radius, aspect], index) => {
-      const response = bands[index];
-      const diffusion = Math.sin(state.wetness + index * .9) * .06 * movement;
-      const size = width * radius * 2 * (.76 + state.energy * .32 + response * .12 + diffusion);
-      const shift = Math.sin(state.wetness * .65 + index) * width * .012 * movement;
-      const pigmentStrength = [.94, .72, .28, .58][index];
-      context.globalAlpha = Math.min(.88, state.energy * pigmentStrength);
-      context.drawImage(state.stamps[index], width * x - size / 2 + shift,
-        height * y - size * aspect / 2, size, size * aspect);
+    state.parcels.forEach(parcel => {
+      const life = parcel.age / parcel.life;
+      const size = width * parcel.radius * 2 * (1 + life * .95) * (.8 + state.energy * .35);
+      context.save();
+      context.translate(width * parcel.x, height * parcel.y);
+      context.rotate(parcel.angle);
+      context.globalAlpha = parcel.opacity * (1 - life) ** 1.5 * state.energy;
+      context.drawImage(state.stamps[parcel.stamp], -size / 2, -size * parcel.aspect / 2, size, size * parcel.aspect);
+      context.restore();
     });
     context.globalAlpha = 1;
   };
@@ -180,7 +257,8 @@
     state.spectrum = new Uint8Array(analyser.frequencyBinCount);
     state.waveform = new Uint8Array(analyser.fftSize);
     const colors = palettes[state.artwork] || palettes["ink-resonance"];
-    state.stamps = colors.map((color, index) => createPigmentStamp(color, 827 + index * 173));
+    state.stamps = colors.flatMap((color, index) => [0, 1].map(variant =>
+      createPigmentStamp(color, 827 + index * 173 + variant * 71)));
     return true;
   };
 
@@ -208,7 +286,11 @@
     const audio = canvas.closest(".work")?.querySelector("audio");
     const context = canvas.getContext("2d");
     if (!audio || !context) return;
-    const state = { canvas, audio, context, artwork: canvas.dataset.artwork, energy: 0, wetness: 0 };
+    const artwork = canvas.dataset.artwork;
+    const state = { canvas, audio, context, artwork, energy: 0, parcels: [],
+      bounds: motionBounds[artwork] || motionBounds["ink-resonance"],
+      random: randomFor(Math.floor(Math.random() * 4294967296)),
+    };
     states.push(state);
     clear(state);
     audio.addEventListener("play", () => { void activate(state); });
