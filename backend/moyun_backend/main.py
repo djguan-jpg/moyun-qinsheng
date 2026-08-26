@@ -380,7 +380,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 metadata = f"""<p class="eyebrow">ANONYMOUS ENTRY</p>
 <h2>匿名作品 #{work['id']:03d}</h2><p class="muted">歌名與創作理念將於主辦單位公告後統一公開。</p>"""
             return f"""<article class="work"><div class="anonymous-art" aria-hidden="true"><img src="{artwork_url}" alt="" loading="lazy" decoding="async"><canvas class="anonymous-visualizer" data-artwork="{artwork_key}"></canvas></div>{metadata}
-<audio controls preload="metadata"><source src="{audio_source}" type="{audio_type}">你的瀏覽器不支援音檔播放。</audio></article>"""
+<audio controls controlsList="nodownload" preload="metadata"><source src="{audio_source}" type="{audio_type}">你的瀏覽器不支援音檔播放。</audio></article>"""
 
         cards = "".join(
             render_work_card(work) for work in works

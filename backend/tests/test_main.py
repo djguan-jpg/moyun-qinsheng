@@ -384,6 +384,9 @@ def test_public_gallery_plays_uploaded_audio_without_exposing_discord_identity(t
     assert "月下長安" not in gallery.text
     assert "一段公開的旋律。" not in gallery.text
     assert "/guyun/media/sample.mp3" in gallery.text
+    # The native player's overflow menu must not offer a download of an entry.
+    assert ('<audio controls controlsList="nodownload" preload="metadata">'
+            '<source src="/guyun/media/sample.mp3" type="audio/mpeg">') in gallery.text
     assert '<img src="/guyun/art/river-dawn?v=landscape-series-20260826" alt="" loading="lazy" decoding="async"><canvas class="anonymous-visualizer" data-artwork="river-dawn"></canvas>' in gallery.text
     assert '/guyun/anonymous-visualizer.js?v=steady-ink-20260826' in gallery.text
     assert '<video' not in gallery.text
