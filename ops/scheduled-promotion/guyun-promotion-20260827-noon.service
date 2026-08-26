@@ -1,0 +1,14 @@
+[Unit]
+Description=One-time Guyun contest announcement to AI creators
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/docker exec ai-song-contest python /data/scheduled-promotion-20260827-noon/send.py --send
+TimeoutStartSec=180
+Restart=on-failure
+RestartSec=60
+RestartPreventExitStatus=78
