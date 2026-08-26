@@ -72,6 +72,7 @@ class Settings:
     public_reveal_work_metadata: bool = False
     admin_user_ids: frozenset[str] = frozenset()
     admin_role_ids: frozenset[str] = frozenset()
+    admin_viewer_user_ids: frozenset[str] = frozenset()
 
     @property
     def discord_is_configured(self) -> bool:
@@ -112,6 +113,11 @@ def load_settings() -> Settings:
         admin_role_ids=frozenset(
             value.strip()
             for value in os.getenv("DISCORD_ADMIN_ROLE_IDS", "").split(",")
+            if value.strip()
+        ),
+        admin_viewer_user_ids=frozenset(
+            value.strip()
+            for value in os.getenv("DISCORD_ADMIN_VIEWER_USER_IDS", "").split(",")
             if value.strip()
         ),
     )
@@ -229,6 +235,17 @@ def is_admin_user(user: dict[str, str] | None, settings: Settings) -> bool:
         return False
     role_ids = set(filter(None, user.get("role_ids", "").split(",")))
     return user.get("id") in settings.admin_user_ids or bool(role_ids & settings.admin_role_ids)
+
+
+def can_view_admin(user: dict[str, str] | None, settings: Settings) -> bool:
+    return bool(user) and (is_admin_user(user, settings) or user.get("id") in settings.admin_viewer_user_ids)
+
+
+def can_register(user: dict[str, str] | None, settings: Settings) -> bool:
+    if not user:
+        return False
+    return (is_admin_user(user, settings) or not settings.participant_role_id
+            or settings.participant_role_id in user.get("role_ids", "").split(","))
 
 
 def page(title: str, body: str, *, status_code: int = 200) -> HTMLResponse:
@@ -445,7 +462,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         is_admin = str(discord_user["id"]) in settings.admin_user_ids or bool(
             roles & settings.admin_role_ids
         )
-        if settings.participant_role_id and settings.participant_role_id not in roles and not is_admin:
+        is_viewer = str(discord_user["id"]) in settings.admin_viewer_user_ids
+        if (settings.participant_role_id and settings.participant_role_id not in roles
+                and not is_admin and not (is_viewer and post_login_destination == "admin")):
             return page(
                 "尚未取得報名資格",
                 "<h1>尚未取得報名資格</h1><p>本活動僅開放持有「音樂創作者」身分組的 Discord 成員報名。</p>",
@@ -460,10 +479,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "role_ids": ",".join(sorted(roles)),
         }
         if post_login_destination == "admin":
-            if not is_admin:
+            if not (is_admin or is_viewer):
                 return page(
                     "沒有管理權限",
-                    "<h1>沒有管理權限</h1><p>請使用活動 Discord 伺服器的管理員帳號登入。</p>",
+                    "<h1>沒有管理權限</h1><p>請使用已獲授權的管理員或後台唯讀帳號登入。</p>",
                     status_code=403,
                 )
             return RedirectResponse(public_path(settings, "/admin"), status_code=303)
@@ -474,10 +493,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         user = get_current_user(request)
         if not user:
             return RedirectResponse(public_path(settings, "/auth/login") + "?next=admin", status_code=303)
-        if not is_admin_user(user, settings):
+        if not can_view_admin(user, settings):
             return page(
                 "沒有管理權限",
-                f"<h1>沒有管理權限</h1><p>此頁僅供活動 Discord 伺服器管理員使用。</p><a class=\"button\" href=\"{public_path(settings, '/auth/login')}?next=admin\">重新使用 Discord 登入</a>",
+                f"<h1>沒有管理權限</h1><p>此頁僅供已獲授權的管理員與後台唯讀帳號使用。</p><a class=\"button\" href=\"{public_path(settings, '/auth/login')}?next=admin\">重新使用 Discord 登入</a>",
                 status_code=403,
             )
         with open_database(settings.database_path) as connection:
@@ -507,19 +526,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             f"""<tr><td>#{item['id']:03d}</td><td><strong>{html.escape(item['discord_username'])}</strong><br><span class=\"muted\">{html.escape(item['display_name'])}</span></td><td><strong>{html.escape(item['work_title'])}</strong>{' <span class=\"muted\">（測試）</span>' if item['is_test'] else ''}<br><span class=\"muted\">{html.escape(item['description'])}</span></td><td>{html.escape(item['category'])}</td><td>{html.escape(item['created_at'])}</td><td>{item['vote_count']} 票</td><td>{('<a href=\"' + public_path(settings, '/media/' + item['audio_filename']) + '\">播放音檔</a>') if item['audio_filename'] else '—'}</td></tr>"""
             for item in registrations
         ) or "<tr><td colspan=\"7\">目前尚無投稿資料。</td></tr>"
-        request.session["csrf_token"] = secrets.token_urlsafe(32)
+        can_manage = is_admin_user(user, settings)
+        if can_manage:
+            request.session["csrf_token"] = secrets.token_urlsafe(32)
         messages = ""
         if test_uploaded:
             messages += notice("測試作品已上傳，可直接在下方清單播放驗證。", success=True)
         if test_error:
             messages += notice(test_error)
+        admin_tools = ""
+        if can_manage:
+            admin_tools = f"""
+<h2>測試作品上傳</h2>{messages}<p class=\"muted\">測試作品不會顯示在一般訪客的公開作品展演頁，僅供後台驗證上傳與播放功能。</p>
+<form method=\"post\" action=\"{public_path(settings, '/admin/test-upload')}\" enctype=\"multipart/form-data\"><input type=\"hidden\" name=\"csrf_token\" value=\"{request.session['csrf_token']}\"><label>測試作品名稱<input name=\"work_title\" required maxlength=\"200\" placeholder=\"例如：後台音檔測試\"></label><label>測試說明<textarea name=\"description\" required maxlength=\"2000\" placeholder=\"可記錄本次測試內容"></textarea></label><label>音檔<input name=\"audio_file\" required type=\"file\" accept=\"audio/mpeg,audio/mp4,audio/wav,audio/ogg,audio/webm,.mp3,.m4a,.wav,.ogg,.webm\"></label><p class=\"muted\">支援 MP3、M4A、WAV、OGG、WEBM，檔案大小上限 25 MB。</p><button type=\"submit\">上傳測試作品</button></form>"""
         body = f"""
 <p class=\"eyebrow\">DISCORD ADMINISTRATION</p><h1>古韻新生・管理後台</h1>
-<p class=\"muted\">已登入為 {html.escape(user['display_name'])}。只有活動 Discord 伺服器管理員可存取此頁。</p>
+<p class=\"muted\">已登入為 {html.escape(user['display_name'])}。{'管理員權限。' if can_manage else '唯讀瀏覽權限：可查看資料與播放音檔，不可上傳或修改。'}</p>
 <div class=\"admin-stats\"><article><p>投稿總數</p><h2>{total}</h2></article><article><p>即時有效票數</p><h2>{valid_votes}</h2></article><article><p>已上傳音檔</p><h2>{with_audio}</h2></article><article><p>測試作品</p><h2>{test_uploads}</h2></article><article><p>報名開放</p><h2>{html.escape(start)}</h2></article><article><p>報名截止</p><h2>{html.escape(end)}</h2></article></div>
-<p class=\"muted\">● 後台資料每 10 秒自動更新；Discord 名稱與票數僅顯示給管理員。</p>
-<h2>測試作品上傳</h2>{messages}<p class=\"muted\">測試作品不會顯示在一般訪客的公開作品展演頁，僅供後台驗證上傳與播放功能。</p>
-<form method=\"post\" action=\"{public_path(settings, '/admin/test-upload')}\" enctype=\"multipart/form-data\"><input type=\"hidden\" name=\"csrf_token\" value=\"{request.session['csrf_token']}\"><label>測試作品名稱<input name=\"work_title\" required maxlength=\"200\" placeholder=\"例如：後台音檔測試\"></label><label>測試說明<textarea name=\"description\" required maxlength=\"2000\" placeholder=\"可記錄本次測試內容"></textarea></label><label>音檔<input name=\"audio_file\" required type=\"file\" accept=\"audio/mpeg,audio/mp4,audio/wav,audio/ogg,audio/webm,.mp3,.m4a,.wav,.ogg,.webm\"></label><p class=\"muted\">支援 MP3、M4A、WAV、OGG、WEBM，檔案大小上限 25 MB。</p><button type=\"submit\">上傳測試作品</button></form>
+<p class=\"muted\">● 後台資料每 10 秒自動更新；Discord 名稱與票數僅顯示給已獲授權的後台使用者。</p>
+{admin_tools}
 <h2>最新投稿</h2><table><thead><tr><th>編號</th><th>投稿者 Discord 名稱</th><th>作品</th><th>組別</th><th>提交時間</th><th>即時票數</th><th>音檔</th></tr></thead><tbody>{rows}</tbody></table>
 <p><a class=\"button\" href=\"{public_path(settings, '/works')}\">查看公開展演</a></p>
 <form method=\"post\" action=\"{public_path(settings, '/auth/logout')}\"><button class=\"logout\" type=\"submit\">登出</button></form><script>window.setTimeout(() => window.location.reload(), 10000);</script>"""
@@ -585,6 +610,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         user = get_current_user(request)
         if not user:
             return RedirectResponse(public_path(settings, "/auth/login"), status_code=303)
+        if not can_register(user, settings):
+            return page("尚未取得報名資格", "<h1>尚未取得報名資格</h1><p>後台唯讀權限不包含投稿資格，請先取得音樂創作者身分組。</p>", status_code=403)
         is_open, message = registration_state(settings)
         if not is_open:
             return page(
@@ -645,6 +672,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         user = get_current_user(request)
         if not user:
             return RedirectResponse(public_path(settings, "/auth/login"), status_code=303)
+        if not can_register(user, settings):
+            return page("尚未取得報名資格", "<h1>尚未取得報名資格</h1><p>後台唯讀權限不包含投稿資格，請先取得音樂創作者身分組。</p>", status_code=403)
         form = await request.form()
         try:
             require_csrf(request, str(form.get("csrf_token", "")))

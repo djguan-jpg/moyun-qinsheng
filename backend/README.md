@@ -37,6 +37,10 @@ window.MOYUN_BACKEND_CONFIG = Object.freeze({
 
 網站前端會以頁面跳轉方式前往 `/register`，不需要 CORS 設定。請不要指向舊的台語比賽後端。
 
+## 後台存取權限
+
+後台網址為 `/admin`（正式站：`/guyun/admin`），仍須使用 Discord 登入並驗證為活動伺服器成員。`DISCORD_ADMIN_USER_IDS` 與 `DISCORD_ADMIN_ROLE_IDS` 保留管理員權限；`DISCORD_ADMIN_VIEWER_USER_IDS` 是獨立的唯讀使用者名單（多位以逗號區隔），可查看投稿、票數與播放音檔，但不會顯示上傳表單，直接呼叫後台上傳端點也會回傳 403。唯讀權限不會授予 Discord 身分組或豁免一般投稿資格。
+
 ## 音檔與公開播放
 
 報名表必須上傳一個 MP3、M4A、WAV、OGG 或 WEBM 音檔，檔案上限為 25 MB。報名完成後，音檔會立即出現在 `/works` 公開展演頁並可直接播放。預設 `PUBLIC_REVEAL_WORK_METADATA=false`，公開頁只會顯示匿名作品編號，歌名與創作理念不會被查詢或輸出；主辦單位公告後才可將此環境變數設為 `true` 並重新部署以公開資料。公開頁一律不會顯示 Discord 帳號、創作者姓名或聯絡信箱。
