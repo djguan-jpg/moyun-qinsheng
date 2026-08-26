@@ -4,15 +4,21 @@
   // Original paintings stay untouched <img> elements. No idle/baked animation.
   // 山水設色：花青、石青、石綠、赭石、淡墨（screen approximations）。
   const palettes = {
-    "ink-resonance": ["#638b91", "#73927d", "#b19b76", "#385b61"],
+    "ink-resonance": ["#385d70", "#638577", "#a18b65", "#344952"],
     "moonlit-strings": ["#355568", "#576f68", "#a18460", "#303b3b"],
     "landscape-score": ["#436b67", "#718b6a", "#9b7952", "#344a50"],
+    "river-dawn": ["#385d70", "#638577", "#a18b65", "#344952"],
+    "bamboo-rain": ["#3c635b", "#718460", "#9b8864", "#314f54"],
+    "ochre-ridge": ["#4c6973", "#69785b", "#987044", "#485654"],
   };
   // Broad travel regions, not fixed centres. Keep the moon itself unobscured.
   const motionBounds = {
     "ink-resonance": [.10, .90, .18, .84],
     "moonlit-strings": [.08, .92, .30, .80],
     "landscape-score": [.08, .92, .20, .82],
+    "river-dawn": [.16, .92, .36, .84],
+    "bamboo-rain": [.08, .72, .30, .82],
+    "ochre-ridge": [.26, .93, .30, .84],
   };
   const states = [];
   const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)");

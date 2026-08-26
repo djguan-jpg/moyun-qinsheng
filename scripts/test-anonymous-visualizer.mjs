@@ -5,7 +5,8 @@ import vm from "node:vm";
 
 const source = readFileSync(new URL("../backend/moyun_backend/static/anonymous-visualizer.js", import.meta.url), "utf8");
 
-function harness({ unavailable = false, deferred = false, reduced = false, seed = 8127 } = {}) {
+function harness({ unavailable = false, deferred = false, reduced = false, seed = 8127,
+  artworkKeys = ["ink-resonance", "moonlit-strings", "landscape-score"] } = {}) {
   const frames = new Map();
   const pending = [];
   const events = {};
@@ -23,12 +24,12 @@ function harness({ unavailable = false, deferred = false, reduced = false, seed 
     beginPath() {}, moveTo() {}, quadraticCurveTo() {}, closePath() {}, fill() {}, fillRect() {},
     drawImage(stamp, ...geometry) { this.marks.push({ alpha: this.globalAlpha, geometry, center: [this.tx, this.ty] }); },
   });
-  const audios = Array.from({ length: 3 }, () => ({
+  const audios = Array.from({ length: artworkKeys.length }, () => ({
     paused: true, ended: false, muted: false, volume: 1, currentTime: 0, events: {},
     addEventListener(name, callback) { this.events[name] = callback; },
     pause() { if (!this.paused) { this.paused = true; this.events.pause(); } },
   }));
-  const canvases = ["ink-resonance", "moonlit-strings", "landscape-score"].map((artwork, i) => ({
+  const canvases = artworkKeys.map((artwork, i) => ({
     dataset: { artwork }, context: context(),
     getContext() { return this.context; },
     getBoundingClientRect() { return { width: 358, height: 226 }; },
@@ -193,3 +194,21 @@ test("silent playback cannot advance the random path", async () => {
   const after = h.canvases[0].context.marks.at(-3).center;
   assert.ok(Math.hypot(after[0] - before[0], after[1] - before[1]) < 15);
 });
+
+for (const artwork of ["river-dawn", "bamboo-rain", "ochre-ridge"]) {
+  test(`${artwork} keeps audio-driven movement across its new composition`, async () => {
+    const h = harness({ artworkKeys: [artwork] }); await h.play();
+    const positions = [];
+    for (let frame = 0; frame < 600; frame++) {
+      h.tick(1);
+      const marks = h.canvases[0].context.marks;
+      if (marks.length >= 3) positions.push(marks.at(-3).center);
+      assert.ok(marks.length <= 96);
+    }
+    const span = axis => Math.max(...positions.map(p => p[axis])) - Math.min(...positions.map(p => p[axis]));
+    assert.ok(span(0) > 90, `${artwork} x travel: ${span(0)}`);
+    assert.ok(span(1) > 25, `${artwork} y travel: ${span(1)}`);
+    h.audios[0].pause();
+    assert.equal(h.canvases[0].context.marks.length, 0);
+  });
+}

@@ -32,10 +32,25 @@ ALLOWED_AUDIO_TYPES = {
     ".webm": {"audio/webm", "application/octet-stream"},
 }
 ANONYMOUS_ARTWORKS = {
-    "ink-resonance": "ink-resonance.png",
+    # Retired URL remains valid, but no longer serves the dark vortex painting.
+    "ink-resonance": "river-dawn.png",
     "moonlit-strings": "moonlit-strings.png",
     "landscape-score": "landscape-score.png",
+    "river-dawn": "river-dawn.png",
+    "bamboo-rain": "bamboo-rain.png",
+    "ochre-ridge": "ochre-ridge.png",
 }
+ARTWORK_VERSION = "landscape-series-20260826"
+NEW_ARTWORK_FIRST_ENTRY_ID = 6
+LEGACY_ARTWORK_ROTATION = ("river-dawn", "moonlit-strings", "landscape-score")
+NEW_ARTWORK_ROTATION = ("river-dawn", "bamboo-rain", "ochre-ridge")
+
+
+def artwork_for_entry(entry_id: int) -> str:
+    """Keep #001–#005 stable except the retired vortex; new entries use the trio."""
+    if entry_id < NEW_ARTWORK_FIRST_ENTRY_ID:
+        return LEGACY_ARTWORK_ROTATION[(entry_id - 1) % len(LEGACY_ARTWORK_ROTATION)]
+    return NEW_ARTWORK_ROTATION[(entry_id - NEW_ARTWORK_FIRST_ENTRY_ID) % len(NEW_ARTWORK_ROTATION)]
 
 # Docker Compose injects these values itself.  Local development reads backend/.env.
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
@@ -339,16 +354,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         def render_work_card(work: sqlite3.Row) -> str:
             audio_source = public_path(settings, "/media/" + work["audio_filename"])
             audio_type = html.escape(work["audio_content_type"] or "audio/mpeg")
-            artwork_keys = tuple(ANONYMOUS_ARTWORKS)
-            artwork_key = artwork_keys[(work["id"] - 1) % len(artwork_keys)]
-            artwork_url = public_path(settings, "/art/" + artwork_key + "?v=canvas-artwork-20260825-v3")
+            artwork_key = artwork_for_entry(work["id"])
+            artwork_url = public_path(settings, "/art/" + artwork_key + "?v=" + ARTWORK_VERSION)
             if settings.public_reveal_work_metadata:
                 metadata = f"""<p class="eyebrow">匿名作品 #{work['id']:03d}・{html.escape(work['category'])}</p>
 <h2>{html.escape(work['work_title'])}</h2><p class="muted">{html.escape(work['description'])}</p>"""
             else:
                 metadata = f"""<p class="eyebrow">ANONYMOUS ENTRY</p>
 <h2>匿名作品 #{work['id']:03d}</h2><p class="muted">歌名與創作理念將於主辦單位公告後統一公開。</p>"""
-            return f"""<article class="work"><div class="anonymous-art" aria-hidden="true"><img src="{artwork_url}" alt=""><canvas class="anonymous-visualizer" data-artwork="{artwork_key}"></canvas></div>{metadata}
+            return f"""<article class="work"><div class="anonymous-art" aria-hidden="true"><img src="{artwork_url}" alt="" loading="lazy" decoding="async"><canvas class="anonymous-visualizer" data-artwork="{artwork_key}"></canvas></div>{metadata}
 <audio controls preload="metadata"><source src="{audio_source}" type="{audio_type}">你的瀏覽器不支援音檔播放。</audio></article>"""
 
         cards = "".join(
@@ -362,7 +376,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         body = f"""
 <p class="eyebrow">PUBLIC LISTENING GALLERY</p><h1>公開作品展演</h1>
 <p>{gallery_description}</p><div class="gallery-grid">{cards}</div>
-<script src="{public_path(settings, '/anonymous-visualizer.js')}?v=wandering-ink-20260826" defer></script>"""
+<script src="{public_path(settings, '/anonymous-visualizer.js')}?v=wandering-landscapes-20260826" defer></script>"""
         return page("公開作品展演", body)
 
     @app.get("/media/{audio_filename}")

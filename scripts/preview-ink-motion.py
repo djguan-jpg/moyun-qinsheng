@@ -10,6 +10,7 @@ import wave
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--port", type=int, default=8016)
+parser.add_argument("--entries", type=int, default=3)
 args = parser.parse_args()
 directory = Path(tempfile.mkdtemp(prefix="guyun-wandering-ink-"))
 database = directory / "preview.sqlite3"
@@ -41,7 +42,7 @@ with wave.open(str(audio), "wb") as handle:
     handle.writeframes(samples.tobytes())
 initialise_database(database)
 with open_database(database) as connection:
-    for number in range(1, 4):
+    for number in range(1, args.entries + 1):
         connection.execute(
             """INSERT INTO registrations
             (discord_user_id, discord_username, display_name, work_title, category,

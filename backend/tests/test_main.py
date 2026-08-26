@@ -373,7 +373,7 @@ def test_public_gallery_plays_uploaded_audio_without_exposing_discord_identity(t
         media = client.get("/media/sample.mp3")
         artworks = [
             client.get(f"/art/{artwork_key}")
-            for artwork_key in ("ink-resonance", "moonlit-strings", "landscape-score")
+            for artwork_key in main.ANONYMOUS_ARTWORKS
         ]
         visualizer = client.get("/anonymous-visualizer.js")
         missing_artwork = client.get("/art/not-a-real-artwork")
@@ -384,8 +384,8 @@ def test_public_gallery_plays_uploaded_audio_without_exposing_discord_identity(t
     assert "月下長安" not in gallery.text
     assert "一段公開的旋律。" not in gallery.text
     assert "/guyun/media/sample.mp3" in gallery.text
-    assert '<img src="/guyun/art/ink-resonance?v=canvas-artwork-20260825-v3" alt=""><canvas class="anonymous-visualizer" data-artwork="ink-resonance"></canvas>' in gallery.text
-    assert '/guyun/anonymous-visualizer.js?v=wandering-ink-20260826' in gallery.text
+    assert '<img src="/guyun/art/river-dawn?v=landscape-series-20260826" alt="" loading="lazy" decoding="async"><canvas class="anonymous-visualizer" data-artwork="river-dawn"></canvas>' in gallery.text
+    assert '/guyun/anonymous-visualizer.js?v=wandering-landscapes-20260826' in gallery.text
     assert '<video' not in gallery.text
     assert "@keyframes anonymous-art" not in gallery.text
     assert "animation:anonymous-art" not in gallery.text
@@ -395,6 +395,11 @@ def test_public_gallery_plays_uploaded_audio_without_exposing_discord_identity(t
     assert media.content == b"fake-mp3-data"
     assert all(artwork.status_code == 200 for artwork in artworks)
     assert all(artwork.headers["content-type"] == "image/png" for artwork in artworks)
+    assert artworks[0].content == artworks[3].content  # retired URL serves river, never vortex
+    for artwork in artworks[3:]:
+        assert artwork.content[:8] == b"\x89PNG\r\n\x1a\n"
+        assert int.from_bytes(artwork.content[16:20], "big") == 1536
+        assert int.from_bytes(artwork.content[20:24], "big") == 1024
     assert missing_artwork.status_code == 404
     assert visualizer.status_code == 200
     assert visualizer.headers["content-type"].startswith("application/javascript")
@@ -411,6 +416,28 @@ def test_public_gallery_plays_uploaded_audio_without_exposing_discord_identity(t
     assert "drawFoldingWindows" not in visualizer.text
     assert "gilded" not in visualizer.text
     assert "ink-flow" not in visualizer.text
+
+
+def test_artwork_rotation_replaces_vortex_without_reshuffling_existing_entries():
+    assert [main.artwork_for_entry(number) for number in range(1, 6)] == [
+        "river-dawn", "moonlit-strings", "landscape-score", "river-dawn", "moonlit-strings",
+    ]
+    assert main.ANONYMOUS_ARTWORKS["ink-resonance"] == "river-dawn.png"
+    assert "ink-resonance.png" not in main.ANONYMOUS_ARTWORKS.values()
+
+
+def test_future_entries_cycle_all_three_new_paintings_deterministically():
+    assert [main.artwork_for_entry(number) for number in range(6, 12)] == [
+        "river-dawn", "bamboo-rain", "ochre-ridge",
+        "river-dawn", "bamboo-rain", "ochre-ridge",
+    ]
+    # Adding a catalogue entry must not silently alter existing assignments.
+    main.ANONYMOUS_ARTWORKS["test-extra-art"] = "test.png"
+    try:
+        assert main.artwork_for_entry(4) == "river-dawn"
+        assert main.artwork_for_entry(7) == "bamboo-rain"
+    finally:
+        del main.ANONYMOUS_ARTWORKS["test-extra-art"]
 
 
 def test_public_gallery_hides_admin_test_uploads(tmp_path):
