@@ -84,21 +84,39 @@ test("idle canvases are empty and pigment textures are lazy, with bounded DPR", 
   assert.equal(h.canvases[0].width, 716);
 });
 
-test("real waveform amplitude and frequency alter ink density and expansion", async () => {
-  const h = harness(); h.signal.amplitude = 6; h.signal.frequency = 25;
-  await h.play(); h.tick();
-  const soft = Math.max(...h.canvases[0].context.marks.map(m => m.alpha));
-  h.signal.amplitude = 45; h.signal.frequency = 180; h.tick();
-  const loud = Math.max(...h.canvases[0].context.marks.map(m => m.alpha));
-  assert.ok(loud > soft);
-  assert.equal(h.stamps, 8, "stamps must not be regenerated each frame");
-  assert.equal(h.frames.size, 1);
+test("rapid loudness changes cannot pulse pigment opacity", async () => {
+  // Suppress travel to isolate density from spatial overlap / random route changes.
+  const steady = harness({ reduced: true }); const pulsed = harness({ reduced: true });
+  await steady.play(); await pulsed.play();
+  for (let frame = 0; frame < 240; frame++) {
+    pulsed.signal.amplitude = frame % 12 < 3 ? 60 : 2;
+    steady.tick(1); pulsed.tick(1);
+    assert.deepEqual(pulsed.canvases[0].context.marks.map(m => m.alpha),
+      steady.canvases[0].context.marks.map(m => m.alpha), "opacity must be independent of amplitude");
+  }
+  assert.equal(pulsed.stamps, 8, "stamps must not be regenerated each frame");
+  assert.equal(pulsed.frames.size, 1);
 });
 
-test("silence, mute and pause clear all pigment immediately", async () => {
-  const h = harness(); await h.play(); h.tick();
-  assert.ok(h.canvases[0].context.marks.length > 0);
-  h.signal.amplitude = 0; h.tick(1);
+test("short musical gaps hold ink; sustained silence fades smoothly without motion", async () => {
+  const h = harness(); await h.play(); h.tick(180);
+  const before = structuredClone(h.canvases[0].context.marks);
+  h.signal.amplitude = 0; h.tick(12);
+  assert.deepEqual(h.canvases[0].context.marks, before, "a 200ms gap must not clear or move ink");
+  let previous = before.reduce((sum, mark) => sum + mark.alpha, 0);
+  const initial = previous;
+  for (let frame = 0; frame < 90; frame++) {
+    h.tick(1);
+    const current = h.canvases[0].context.marks.reduce((sum, mark) => sum + mark.alpha, 0);
+    assert.ok(current <= previous + 1e-10, "silent pigment may only fade");
+    assert.ok(previous - current < initial * .035, "no abrupt silence-gate flash");
+    previous = current;
+  }
+  assert.equal(h.canvases[0].context.marks.length, 0);
+});
+
+test("initial silence never draws pigment; mute and pause still clear immediately", async () => {
+  const h = harness(); h.signal.amplitude = 0; await h.play(); h.tick(180);
   assert.equal(h.canvases[0].context.marks.length, 0, "stale frequency data cannot animate silence");
   h.signal.amplitude = 45; h.tick();
   h.audios[0].muted = true; h.audios[0].events.volumechange(); h.tick();
@@ -106,6 +124,13 @@ test("silence, mute and pause clear all pigment immediately", async () => {
   h.audios[0].muted = false; h.tick(); h.audios[0].pause();
   assert.equal(h.frames.size, 0);
   assert.equal(h.canvases[0].context.marks.length, 0);
+});
+
+test("new pigment fades in instead of appearing at full density", async () => {
+  const h = harness(); await h.play(); h.tick();
+  assert.ok(h.canvases[0].context.marks.length > 0);
+  assert.ok(h.canvases[0].context.marks.slice(-3).every(mark => mark.alpha < .02));
+  assert.ok(h.canvases[0].context.marks.slice(0,3).some(mark => mark.alpha > .05));
 });
 
 test("only one work plays; switching and replay reuse the audio graph", async () => {

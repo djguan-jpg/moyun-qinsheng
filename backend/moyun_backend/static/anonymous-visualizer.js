@@ -59,6 +59,10 @@
 
   const reset = (state) => {
     state.energy = 0;
+    state.bands = [0, 0, 0];
+    state.visibility = 0;
+    state.silentFor = 0;
+    state.hasSignal = false;
     state.currents = undefined;
     state.parcels = [];
     state.lastTime = undefined;
@@ -120,6 +124,10 @@
   };
 
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+  const smoothstep = (value) => {
+    const t = clamp(value, 0, 1);
+    return t * t * (3 - 2 * t);
+  };
   const randomPoint = (state) => {
     const [left, right, top, bottom] = state.bounds;
     return { x: left + state.random() * (right - left), y: top + state.random() * (bottom - top) };
@@ -188,7 +196,8 @@
         angle: state.random() * Math.PI * 2, spin: (state.random() - .5) * .65,
         radius: .055 + state.random() * .045 + response * .024,
         aspect: .72 + state.random() * .55,
-        opacity: (pigment === 2 ? .12 : .29) * (.55 + state.energy * .45),
+        // Pigment density never follows loudness; only its motion/width do.
+        opacity: pigment === 2 ? .12 : .29,
         stamp: pigment * 2 + Math.floor(state.random() * 2),
       });
     }
@@ -198,35 +207,42 @@
 
   const drawInkBloom = (state) => {
     clear(state);
-    const amplitude = rms(state.waveform);
-    // Smoothed frequency bins must never create fake movement during silence.
-    if (amplitude < .003 || state.audio.muted || state.audio.volume === 0) {
-      state.energy = 0;
-      state.parcels = [];
-      state.lastTime = state.audio.currentTime;
-      return;
-    }
     const now = state.audio.currentTime;
     const delta = Math.max(0, Math.min(.05, now - (state.lastTime ?? now)));
     state.lastTime = now;
-    const signal = Math.min(1, amplitude * state.audio.volume * 7);
-    const follow = 1 - Math.exp(-delta * (signal > state.energy ? 9 : 3));
-    state.energy += (signal - state.energy) * follow;
-    const bass = average(state.spectrum, 1, 7);
-    const mid = average(state.spectrum, 7, 32);
-    const high = average(state.spectrum, 32, 100);
-    const bands = [bass, mid, high];
-    if (state.energy < .005) return;
-    advanceInk(state, delta, bands);
+    if (state.audio.muted || state.audio.volume === 0) { reset(state); return; }
+    const amplitude = rms(state.waveform);
+    // Hysteresis prevents low-level audio from repeatedly opening/closing the gate.
+    const audible = amplitude >= (state.hasSignal ? .0015 : .003);
+    state.hasSignal = audible;
+    if (audible) {
+      state.silentFor = 0;
+      state.visibility += (1 - state.visibility) * (1 - Math.exp(-delta * 3));
+      const signal = Math.min(1, amplitude * state.audio.volume * 7);
+      const follow = 1 - Math.exp(-delta * 1.8);
+      state.energy += (signal - state.energy) * follow;
+      const bands = [average(state.spectrum, 1, 7), average(state.spectrum, 7, 32),
+        average(state.spectrum, 32, 100)];
+      bands.forEach((band, index) => { state.bands[index] += (band - state.bands[index]) * follow; });
+      advanceInk(state, delta, state.bands);
+    } else {
+      // Freeze through short musical gaps; sustained silence only fades existing
+      // pigment. Never spawn pigment or advance random routes without real audio.
+      state.silentFor += delta;
+      state.visibility = Math.min(state.visibility, 1 - smoothstep((state.silentFor - .45) / .9));
+      if (state.visibility <= 0) { state.parcels = []; state.energy = 0; state.bands = [0, 0, 0]; return; }
+    }
     const { context, width, height } = state;
     context.globalCompositeOperation = "source-over";
     state.parcels.forEach(parcel => {
       const life = parcel.age / parcel.life;
-      const size = width * parcel.radius * 2 * (1 + life * .95) * (.8 + state.energy * .35);
+      const size = width * parcel.radius * 2 * (1 + life * .95);
       context.save();
       context.translate(width * parcel.x, height * parcel.y);
       context.rotate(parcel.angle);
-      context.globalAlpha = parcel.opacity * (1 - life) ** 1.5 * state.energy;
+      // Gentle birth/death avoids individual stamp flashes; no beat-level alpha.
+      context.globalAlpha = parcel.opacity * smoothstep(parcel.age / .35)
+        * (1 - smoothstep(life)) * state.visibility;
       context.drawImage(state.stamps[parcel.stamp], -size / 2, -size * parcel.aspect / 2, size, size * parcel.aspect);
       context.restore();
     });
@@ -294,6 +310,7 @@
     if (!audio || !context) return;
     const artwork = canvas.dataset.artwork;
     const state = { canvas, audio, context, artwork, energy: 0, parcels: [],
+      bands: [0, 0, 0], visibility: 0, silentFor: 0, hasSignal: false,
       bounds: motionBounds[artwork] || motionBounds["ink-resonance"],
       random: randomFor(Math.floor(Math.random() * 4294967296)),
     };

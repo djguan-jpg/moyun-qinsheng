@@ -11,6 +11,7 @@ import wave
 parser = argparse.ArgumentParser()
 parser.add_argument("--port", type=int, default=8016)
 parser.add_argument("--entries", type=int, default=3)
+parser.add_argument("--pulse-test", action="store_true", help="Rapid loud/quiet notes and short gaps for anti-flicker QA")
 args = parser.parse_args()
 directory = Path(tempfile.mkdtemp(prefix="guyun-wandering-ink-"))
 database = directory / "preview.sqlite3"
@@ -28,6 +29,9 @@ samples = array("h")
 for index in range(rate * 24):
     t = index / rate
     amplitude = .24 + .12 * math.sin(t * 1.7) ** 2
+    if args.pulse_test:
+        phase = t % .6
+        amplitude = .36 if phase < .15 else (.025 if phase < .45 else 0)
     # A known silent interval makes the silence gate observable in the browser.
     if 10 <= t < 12:
         amplitude = 0
