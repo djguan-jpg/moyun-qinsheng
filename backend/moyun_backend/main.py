@@ -264,6 +264,7 @@ def page(title: str, body: str, *, status_code: int = 200) -> HTMLResponse:
   button,a.button {{ display:inline-block; width:fit-content; border:0; padding:12px 18px; background:#234d45; color:#fff; font:inherit; text-decoration:none; cursor:pointer; }}
   .notice {{ padding:13px 15px; border-left:4px solid #9d4733; background:#f6e9e3; }} .success {{ border-color:#28634c; background:#e6f1e9; }}
   .muted {{ color:#66736e; font-size:.92rem; }} .logout {{ margin-top:24px; background:transparent; color:#234d45; padding:0; text-decoration:underline; }}
+  .gallery-navigation {{ margin:0 0 20px; }} .gallery-back {{ display:inline-flex; align-items:center; min-height:44px; box-sizing:border-box; padding:10px 16px; border:1px solid #b9c5bd; color:#234d45; background:#f7f8f2; text-decoration:none; font-size:.95rem; }} .gallery-back:hover {{ background:#e6eee8; }} .gallery-back:focus-visible {{ outline:2px solid #234d45; outline-offset:3px; }}
   .gallery,.admin {{ width:min(1060px,calc(100% - 40px)); }} .gallery-grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:18px; margin-top:24px; }} .work {{ padding:20px; border:1px solid #d8d1c3; background:#fff; }} .work h2 {{ margin:.3rem 0 .8rem; font-size:1.2rem; }} audio {{ width:100%; }}
   @media (max-width:640px) {{ body {{ display:block; }} main {{ box-sizing:border-box; width:100%; margin:0; padding:16px; }} .gallery-grid {{ grid-template-columns:1fr; gap:14px; margin-top:18px; }} .work {{ padding:14px; }} .anonymous-art {{ height:clamp(190px,58vw,280px); margin:-14px -14px 15px; }} .work h2 {{ font-size:1.13rem; }} }}
   .admin-stats {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin:24px 0; }} .admin-stats article {{ padding:18px; background:#f3f6f1; border:1px solid #d8d1c3; }} .admin-stats p,.admin-stats h2 {{ margin:.15rem 0; }} table {{ width:100%; border-collapse:collapse; margin-top:16px; }} th,td {{ padding:12px 8px; border-bottom:1px solid #ded8cb; text-align:left; vertical-align:top; }} th {{ color:#66736e; font-size:.82rem; }}
@@ -351,6 +352,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/works")
     async def public_works() -> HTMLResponse:
+        navigation = """<nav class="gallery-navigation" aria-label="展間導覽"><a class="gallery-back" href="/#home">← 回到首頁</a></nav>"""
         metadata_columns = ", work_title, category, description" if settings.public_reveal_work_metadata else ""
         with open_database(settings.database_path) as connection:
             works = connection.execute(
@@ -363,6 +365,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ).fetchall()
         if not works:
             body = f"""
+{navigation}
 <p class="eyebrow">PUBLIC LISTENING GALLERY</p><h1>公開作品展演</h1>
 {notice("目前尚無公開作品；首件完成投稿的作品將會出現在這裡。")}
 <a class="button" href="{public_path(settings, '/')}">回到報名入口</a>"""
@@ -391,6 +394,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             else "以下作品均以匿名編號呈現，可直接播放音檔；歌名與創作理念將於主辦單位公告後統一公開。"
         )
         body = f"""
+{navigation}
 <p class="eyebrow">PUBLIC LISTENING GALLERY</p><h1>公開作品展演</h1>
 <p>{gallery_description}</p><div class="gallery-grid">{cards}</div>
 <script src="{public_path(settings, '/anonymous-visualizer.js')}?v=steady-ink-20260826" defer></script>"""
@@ -421,6 +425,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         path = Path(__file__).resolve().parent / "static" / "anonymous-visualizer.js"
         if not path.is_file():
             raise HTTPException(status_code=404, detail="找不到匿名作品播放器。")
+        return FileResponse(path, media_type="application/javascript", headers={"Cache-Control": "no-cache"})
+
+    @app.get("/gallery-navigation.js")
+    async def stream_gallery_navigation() -> FileResponse:
+        path = Path(__file__).resolve().parent / "static" / "gallery-navigation.js"
         return FileResponse(path, media_type="application/javascript", headers={"Cache-Control": "no-cache"})
 
     @app.get("/auth/login")
@@ -540,6 +549,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 <h2>測試作品上傳</h2>{messages}<p class=\"muted\">測試作品不會顯示在一般訪客的公開作品展演頁，僅供後台驗證上傳與播放功能。</p>
 <form method=\"post\" action=\"{public_path(settings, '/admin/test-upload')}\" enctype=\"multipart/form-data\"><input type=\"hidden\" name=\"csrf_token\" value=\"{request.session['csrf_token']}\"><label>測試作品名稱<input name=\"work_title\" required maxlength=\"200\" placeholder=\"例如：後台音檔測試\"></label><label>測試說明<textarea name=\"description\" required maxlength=\"2000\" placeholder=\"可記錄本次測試內容"></textarea></label><label>音檔<input name=\"audio_file\" required type=\"file\" accept=\"audio/mpeg,audio/mp4,audio/wav,audio/ogg,audio/webm,.mp3,.m4a,.wav,.ogg,.webm\"></label><p class=\"muted\">支援 MP3、M4A、WAV、OGG、WEBM，檔案大小上限 25 MB。</p><button type=\"submit\">上傳測試作品</button></form>"""
         body = f"""
+<nav class="gallery-navigation" aria-label="後台導覽"><a class="gallery-back" href="/#home">← 回到首頁</a></nav>
 <p class=\"eyebrow\">DISCORD ADMINISTRATION</p><h1>古韻新生・管理後台</h1>
 <p class=\"muted\">已登入為 {html.escape(user['display_name'])}。{'管理員權限。' if can_manage else '唯讀瀏覽權限：可查看資料與播放音檔，不可上傳或修改。'}</p>
 <div class=\"admin-stats\"><article><p>投稿總數</p><h2>{total}</h2></article><article><p>即時有效票數</p><h2>{valid_votes}</h2></article><article><p>已上傳音檔</p><h2>{with_audio}</h2></article><article><p>測試作品</p><h2>{test_uploads}</h2></article><article><p>報名開放</p><h2>{html.escape(start)}</h2></article><article><p>報名截止</p><h2>{html.escape(end)}</h2></article></div>

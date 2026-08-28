@@ -32,7 +32,6 @@ viewButtons.forEach((button) => button.addEventListener('click', (event) => {
   if (!viewId) return;
   event.preventDefault();
   showView(viewId);
-  if (viewId === 'info' && button.dataset.infoTarget) showInfoTab(button.dataset.infoTarget);
 }));
 document.querySelector('.menu-button').addEventListener('click', () => document.querySelector('.main-nav').classList.toggle('open'));
 document.querySelectorAll('[data-admin]').forEach((button) => button.addEventListener('click', () => {
@@ -43,6 +42,7 @@ document.querySelectorAll('[data-admin]').forEach((button) => button.addEventLis
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }));
 document.querySelector('.mobile-admin-menu').addEventListener('click', () => document.querySelector('.admin-sidebar').classList.toggle('open'));
+document.querySelectorAll('.vote-button').forEach((button) => button.addEventListener('click', () => { button.innerHTML = '✓ 已完成今日投票'; button.disabled = true; }));
 document.querySelectorAll('.filters button,.news-cats button').forEach((button) => button.addEventListener('click', () => {
   const group = button.parentElement.querySelectorAll('button');
   group.forEach((item) => item.classList.remove('active'));
@@ -970,7 +970,7 @@ function triggerSpirit(spiritId) {
   spiritTimers.set(spiritId, window.setTimeout(() => card.classList.remove('is-playing', 'is-combo'), 1900));
 }
 
-function stopSpiritVideo(spiritId) {
+function stopSpiritVideo(spiritId, hasFinished = false) {
   const card = spiritCards.get(spiritId);
   const interaction = spiritInteractions[spiritId];
   const video = card?.querySelector('[data-spirit-video]');
@@ -979,6 +979,10 @@ function stopSpiritVideo(spiritId) {
   try { video.currentTime = 0; } catch (_) { /* The browser has not loaded metadata yet. */ }
   card.classList.remove('is-video-playing');
   card.removeAttribute('aria-busy');
+  if (hasFinished) {
+    const response = card.querySelector('.spirit-response');
+    if (response) response.textContent = interaction.idleMessage;
+  }
 }
 
 function playSpiritVideo(spiritId) {
@@ -993,11 +997,13 @@ function playSpiritVideo(spiritId) {
   try { video.currentTime = 0; } catch (_) { /* Metadata is still loading; play() will begin at the start. */ }
   card.classList.add('is-video-playing');
   card.setAttribute('aria-busy', 'true');
+  const response = card.querySelector('.spirit-response');
+  if (response) response.textContent = `${interaction.videoMessage} 影片結束後會回到待機。`;
   const playPromise = video.play();
   if (playPromise) {
     playPromise.catch(() => {
       stopSpiritVideo(spiritId);
-      // The generated quest remains usable even if the decorative video cannot play.
+      if (response) response.textContent = '影片暫時無法播放，請再試一次。';
     });
   }
 }
@@ -1011,7 +1017,7 @@ document.querySelectorAll('[data-spirit-action]').forEach((button) => {
 });
 
 document.querySelectorAll('[data-spirit-video]').forEach((video) => {
-  video.addEventListener('ended', () => stopSpiritVideo(video.dataset.spiritVideo));
+  video.addEventListener('ended', () => stopSpiritVideo(video.dataset.spiritVideo, true));
   video.addEventListener('error', () => stopSpiritVideo(video.dataset.spiritVideo));
 });
 

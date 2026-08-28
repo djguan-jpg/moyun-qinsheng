@@ -51,4 +51,4 @@ window.MOYUN_BACKEND_CONFIG = Object.freeze({
 
 ## 預設時程
 
-報名開放時間由 `.env` 的 `REGISTRATION_START_AT` 與 `REGISTRATION_END_AT` 控制，採用 ISO 8601 格式。範例已設定為 2026-08-25 12:00（台北時間）開放，2026-09-12 23:59 截止；結束時間留空則持續開放。
+報名開放時間由 `.env` 的 `REGISTRATION_START_AT` 與 `REGISTRATION_END_AT` 控制，採用 ISO 8601 格式。範例已設定為 2026-08-25 12:00（台北時間）開放，並因網站維修延長 48 小時至 2026-09-14 23:59 截止；結束時間留空則持續開放。

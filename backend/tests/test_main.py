@@ -379,6 +379,9 @@ def test_public_gallery_plays_uploaded_audio_without_exposing_discord_identity(t
         missing_artwork = client.get("/art/not-a-real-artwork")
 
     assert gallery.status_code == 200
+    assert 'href="/#home">← 回到首頁</a>' in gallery.text
+    assert 'data-gallery-back' not in gallery.text
+    assert 'gallery-navigation.js' not in gallery.text
     assert "匿名作品 #001" in gallery.text
     assert "歌名與創作理念將於主辦單位公告後統一公開。" in gallery.text
     assert "月下長安" not in gallery.text

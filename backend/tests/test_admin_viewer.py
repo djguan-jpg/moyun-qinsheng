@@ -48,6 +48,7 @@ def test_viewer_can_read_without_creator_role_but_cannot_write(settings, monkeyp
         assert response.headers["location"] == "/guyun/admin"
         dashboard = client.get("/admin")
         assert dashboard.status_code == 200
+        assert 'href="/#home">← 回到首頁</a>' in dashboard.text
         assert "唯讀瀏覽權限" in dashboard.text
         assert "最新投稿" in dashboard.text and "即時有效票數" in dashboard.text
         assert "/admin/test-upload" not in dashboard.text
@@ -79,6 +80,7 @@ def test_existing_admin_management_is_preserved(settings, monkeypatch, user_id, 
         assert login(client, monkeypatch, user_id=user_id, roles=roles).status_code == 303
         dashboard = client.get("/admin")
         assert dashboard.status_code == 200 and "/admin/test-upload" in dashboard.text
+        assert 'href="/#home">← 回到首頁</a>' in dashboard.text
         token = dashboard.text.split('name="csrf_token" value="')[1].split('"')[0]
         upload = client.post("/admin/test-upload", data={"csrf_token": token, "work_title": "test", "description": "test"},
                              files={"audio_file": ("test.mp3", b"audio", "audio/mpeg")}, follow_redirects=False)
