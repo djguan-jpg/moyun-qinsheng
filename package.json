@@ -5,7 +5,7 @@
     "build": "node tools/build.mjs",
     "types": "wrangler types --env-interface CloudflareBindings",
     "test": "node --test --test-concurrency=20 tests/*.test.js",
-    "check": "node --check src/worker.js && node --check src/security.js && node --check src/static/contest-ui.js && node --check tools/build.mjs"
+    "check": "node --check src/worker.js && node --check src/security.js && node --check src/static/contest-ui.js && node --check tools/build.mjs && python -m py_compile tools/import_verified_legacy.py"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "latest",
