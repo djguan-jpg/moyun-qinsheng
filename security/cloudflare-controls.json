@@ -1,0 +1,10 @@
+{
+  "mode": "merge",
+  "defaultAction": "dry-run",
+  "rules": [
+    {"ref":"guyun_api_rate","expression":"http.host eq \"contest.zoeg.studio\" and starts_with(http.request.uri.path, \"/api/\")","action":"managed_challenge","note":"Tune thresholds after staging abuse tests."},
+    {"ref":"guyun_oauth_callback_narrow_skip","expression":"http.host eq \"contest.zoeg.studio\" and http.request.method eq \"GET\" and http.request.uri.path eq \"/auth/discord/callback\"","action":"skip","products":["bic"],"note":"Does not skip managed WAF, rate limits, Access, or Worker authorization."},
+    {"ref":"guyun_turnstile_no_skip","expression":"http.host eq \"contest.zoeg.studio\" and starts_with(http.request.uri.path, \"/api/\")","action":"execute","note":"Turnstile verification remains inside the Worker; no broad WAF allow rule."}
+  ],
+  "usageGates":{"workersRequestsPerDay":100000,"d1RowsReadPerDay":1000000,"r2EgressBytesPerDay":53687091200,"distinctPublicIdsPerIpPerDay":500,"action":"open application circuit and alert"}
+}

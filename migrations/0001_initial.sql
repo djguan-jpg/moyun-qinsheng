@@ -1,0 +1,17 @@
+PRAGMA foreign_keys = ON;
+CREATE TABLE users (discord_user_id TEXT PRIMARY KEY, username_snapshot TEXT NOT NULL, display_name_snapshot TEXT NOT NULL, roles_json TEXT NOT NULL DEFAULT '[]', roles_checked_at TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE registrations (id INTEGER PRIMARY KEY, public_id TEXT NOT NULL UNIQUE, discord_user_id TEXT NOT NULL UNIQUE REFERENCES users(discord_user_id), title TEXT NOT NULL, category TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', contact_email TEXT NOT NULL, audio_object_key TEXT, audio_original_name TEXT, audio_content_type TEXT, audio_size INTEGER, audio_sha256 TEXT, audio_state TEXT NOT NULL DEFAULT 'none' CHECK(audio_state IN ('none','staged','active','quarantined')), is_test INTEGER NOT NULL DEFAULT 0 CHECK(is_test IN (0,1)), published INTEGER NOT NULL DEFAULT 0 CHECK(published IN (0,1)), created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE vote_stages (id INTEGER PRIMARY KEY, slug TEXT NOT NULL UNIQUE, title TEXT NOT NULL, opens_at TEXT NOT NULL, closes_at TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 0 CHECK(active IN (0,1)), created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
+CREATE TABLE votes (id INTEGER PRIMARY KEY, registration_id INTEGER NOT NULL REFERENCES registrations(id), voter_discord_id TEXT NOT NULL REFERENCES users(discord_user_id), stage_id INTEGER NOT NULL REFERENCES vote_stages(id), idempotency_key TEXT NOT NULL, created_at TEXT NOT NULL, UNIQUE(registration_id,voter_discord_id,stage_id), UNIQUE(voter_discord_id,stage_id,idempotency_key));
+CREATE TABLE sessions (token_hash TEXT PRIMARY KEY, discord_user_id TEXT NOT NULL REFERENCES users(discord_user_id), csrf_secret TEXT NOT NULL, roles_json TEXT NOT NULL, roles_checked_at TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, revoked_at TEXT);
+CREATE TABLE oauth_transactions (state_hash TEXT PRIMARY KEY, verifier TEXT NOT NULL, destination TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, consumed_at TEXT);
+CREATE TABLE admin_grants (discord_user_id TEXT NOT NULL REFERENCES users(discord_user_id), grant_type TEXT NOT NULL CHECK(grant_type IN ('admin','viewer')), created_at TEXT NOT NULL, PRIMARY KEY(discord_user_id,grant_type));
+CREATE TABLE competition_settings (key TEXT PRIMARY KEY, value_json TEXT NOT NULL, updated_at TEXT NOT NULL, updated_by TEXT);
+CREATE TABLE migration_imports (source_sha256 TEXT PRIMARY KEY, source_name TEXT NOT NULL, plan_json TEXT NOT NULL, registrations_count INTEGER NOT NULL, votes_count INTEGER NOT NULL, objects_count INTEGER NOT NULL, applied_at TEXT NOT NULL);
+CREATE TABLE rate_limits (bucket TEXT NOT NULL, subject_hash TEXT NOT NULL, window_start INTEGER NOT NULL, count INTEGER NOT NULL, PRIMARY KEY(bucket,subject_hash,window_start));
+CREATE TABLE capability_nonces (nonce TEXT PRIMARY KEY, public_id TEXT NOT NULL, expires_at INTEGER NOT NULL);
+CREATE TABLE audit_events (id INTEGER PRIMARY KEY, event_type TEXT NOT NULL, actor_hash TEXT, subject TEXT, outcome TEXT NOT NULL, detail_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL);
+CREATE INDEX registrations_public ON registrations(published,is_test,audio_state,id DESC);
+CREATE INDEX votes_stage ON votes(stage_id,registration_id);
+CREATE INDEX sessions_user ON sessions(discord_user_id,expires_at);
+CREATE INDEX audit_created ON audit_events(created_at);

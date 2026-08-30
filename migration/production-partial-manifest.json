@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "manifestId": "guyun-old-public-14-2026-08-30",
+  "immutable": true,
+  "orderingEvidence": "Fresh read-only GET of old /guyun/works on 2026-08-30; filtered in-place to the 14 audit-proven local matches.",
+  "excludedMissingCount": 6,
+  "excludedLocallyBundledNotPublicCount": 2,
+  "works": [
+    {"publicId":"legacy-005","displayOrder":5,"filename":"Hv-Kl78_cUI1_BjWsxOFhPz7.mp3","size":6071856,"sha256":"d710d09308c00115f3f299c4a7bdd4c62b01ef66e662d1dde713fa6154419549","contentType":"audio/mpeg"},
+    {"publicId":"legacy-006","displayOrder":6,"filename":"ZKPpOj5M4zPoM2FScMJy3st9.mp3","size":6150404,"sha256":"fc086c710956012ba9fac961569a1a0e3c2a3f96f55602d9b7a8ec2c67933ca0","contentType":"audio/mpeg"},
+    {"publicId":"legacy-008","displayOrder":8,"filename":"ZrwHlzAbq4W6rRWKvxkvNuQY.mp3","size":9671575,"sha256":"f4800b8da0dd77c21dccd28558e1fc2a05f8a6f391526c4c48123e56b9806801","contentType":"audio/mpeg"},
+    {"publicId":"legacy-009","displayOrder":9,"filename":"XsNDDZg53CMEq2Oyy0gatm9D.mp3","size":5761694,"sha256":"426bb3caac64670ef5dccf49378ccf48feb1a84148b4194d388f3db748f26522","contentType":"audio/mpeg"},
+    {"publicId":"legacy-010","displayOrder":10,"filename":"QTZ8ohZuw0mwi2g63uAxtLlI.mp3","size":6950400,"sha256":"cfe802ac0b650c7c42956768cb510a5ac87f95f7bf0a301b8c734df1de98ea76","contentType":"audio/mpeg"},
+    {"publicId":"legacy-011","displayOrder":11,"filename":"XHnFJ6diEAsMLwJH0kDsVR48.mp3","size":3691593,"sha256":"98fa3741e647f0a6ac173748055f8c75d353a19516feb554b71a36c5e0891b1f","contentType":"audio/mpeg"},
+    {"publicId":"legacy-012","displayOrder":12,"filename":"pG5kqmx2BLBOgmTW_BbLJLKB.mp3","size":6416782,"sha256":"ad44eadf356ed4317117d32fd7ccc5cc8cc6773190e02717b09503ee4cf72bfb","contentType":"audio/mpeg"},
+    {"publicId":"legacy-014","displayOrder":14,"filename":"ZMZERU4i_GRLUUJZugWTSlro.mp3","size":8800699,"sha256":"17ce85a2f74e9e9a58a2f4adface46c531e0e03b8112446f56514ede0f98b061","contentType":"audio/mpeg"},
+    {"publicId":"legacy-015","displayOrder":15,"filename":"nE3opo5EF-w5AssycGKlg9QW.mp3","size":6212631,"sha256":"c6800b07c50aafb04616bdea630a8425e680a36909dc659f8a9bb15a59479d77","contentType":"audio/mpeg"},
+    {"publicId":"legacy-016","displayOrder":16,"filename":"Z1vl_3P_rbBY3Mnzw1axEMeO.mp3","size":5961190,"sha256":"8f5280476cb1dac7fe04243bbd4da15d36c87ca902d2ee136aabe92f8affe31f","contentType":"audio/mpeg"},
+    {"publicId":"legacy-017","displayOrder":17,"filename":"-4h6bOdSDwwvsyy-ZbmYurAJ.mp3","size":6414439,"sha256":"25c3b9af3fefaf2019873cd0e2cafd10d45403de70108f23203ebea85a40be47","contentType":"audio/mpeg"},
+    {"publicId":"legacy-018","displayOrder":18,"filename":"MiosCGcYSkwDK0rPIg9kDWtK.mp3","size":6199087,"sha256":"341c0838075286803f203cbe5d73183278142546955ab069c203fee29e2c70cd","contentType":"audio/mpeg"},
+    {"publicId":"legacy-019","displayOrder":19,"filename":"qzXGphhaT4EODJd-4UQY7Vjo.mp3","size":8811624,"sha256":"068ceae0e60d8ad2ae373c1fb5d12b1d2b2cb68a7a3f948b51f6b8f5ac95d9db","contentType":"audio/mpeg"},
+    {"publicId":"legacy-020","displayOrder":20,"filename":"tvzuWvZElnH_wpse_CCXqw6y.mp3","size":6954316,"sha256":"ed6fedc135b54f2adbe68fbf7ebe2b07d4b5bd80e003fffde762ff02528db023","contentType":"audio/mpeg"}
+  ]
+}

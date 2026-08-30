@@ -1,0 +1,15 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node tools/build.mjs",
+    "types": "wrangler types --env-interface CloudflareBindings",
+    "test": "node --test --test-concurrency=20 tests/*.test.js",
+    "check": "node --check src/worker.js && node --check src/security.js && node --check src/static/contest-ui.js && node --check tools/build.mjs"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "latest",
+    "@types/node": "^26.4.0",
+    "wrangler": "4.127.1"
+  }
+}
