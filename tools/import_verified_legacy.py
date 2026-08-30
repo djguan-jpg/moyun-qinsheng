@@ -35,27 +35,27 @@ def q(value) -> str:
 def verify_checksums(root: Path) -> None:
     checks = root / "checksums.sha256"
     if not checks.is_file(): raise SystemExit("checksum gate missing")
-    checked = 0
-    digest_index = None
+    checked = 0; seen_paths = set(); seen_digests = set()
+    root = root.resolve()
+    # Thin verified backups keep reconstructed/extracted files below root while
+    # split archive parts remain as direct files beside it.  Never recurse into
+    # unrelated sibling trees (for example a source checkout), because legitimate
+    # duplicate bytes there would make verification depend on orchestration layout.
+    files = ([x for x in root.rglob("*") if x.is_file() and x != checks] +
+             [x for x in root.parent.iterdir() if x.is_file()])
+    digest_index = {}
+    for candidate in files: digest_index.setdefault(sha256(candidate), set()).add(candidate.resolve())
     for line in checks.read_text(encoding="utf-8").splitlines():
         if not line.strip(): continue
-        digest, rel = line.split(maxsplit=1); rel = rel.lstrip("* ").strip('"').replace("\\", "/")
-        candidates = [(root / rel).resolve(), (root.parent / rel).resolve()]
-        # Accepted backup manifests may retain an extraction-root prefix. Resolve
-        # a unique basename only within the verified root; ambiguity fails closed.
-        basename_matches = list(root.rglob(rel.rsplit("/", 1)[-1]))
-        if len(basename_matches) == 1: candidates.append(basename_matches[0].resolve())
-        target = next((x for x in candidates if x.is_file() and (x == root.resolve() or root.resolve() in x.parents)), None)
-        if target is None or sha256(target) != digest.lower():
-            if digest_index is None:
-                digest_index = {}
-                for candidate in root.parent.rglob("*"):
-                    if "implementation" in candidate.parts or not candidate.is_file() or candidate == checks:
-                        continue
-                    if candidate.is_file():
-                        digest_index.setdefault(sha256(candidate), []).append(candidate)
-            if len(digest_index.get(digest.lower(), [])) != 1:
-                raise SystemExit("backup checksum gate failed")
+        try: digest, rel = line.split(maxsplit=1)
+        except ValueError: raise SystemExit("backup checksum gate failed")
+        digest = digest.lower(); rel = rel.lstrip("* ").strip('"').replace("\\", "/")
+        parts = Path(rel).parts; folded = rel.casefold()
+        if (not HEX64.fullmatch(digest) or not rel or Path(rel).is_absolute() or
+                ".." in parts or folded in seen_paths or digest in seen_digests):
+            raise SystemExit("backup checksum gate failed")
+        seen_paths.add(folded); seen_digests.add(digest)
+        if len(digest_index.get(digest, set())) != 1: raise SystemExit("backup checksum gate failed")
         checked += 1
     if checked == 0: raise SystemExit("empty checksum manifest")
 
