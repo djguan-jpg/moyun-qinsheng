@@ -9,6 +9,10 @@ from pathlib import Path
 
 EXPECTED_COUNT, REUSE_COUNT, NEW_COUNT = 20, 14, 6
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
+TRANSACTION_TOKEN = re.compile(
+    r"(?im)^\s*(?:BEGIN|COMMIT|END|ROLLBACK|SAVEPOINT|RELEASE)\b"
+)
+D1_DATABASE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$")
 
 def sha256(path: Path) -> str:
     h = hashlib.sha256()
@@ -88,6 +92,30 @@ def load_state(path: Path) -> list[dict]:
         raise SystemExit("expected-state uniqueness gate failed")
     return works
 
+def validate_import_sql(sql: str) -> None:
+    """Fail closed before handing the already-atomic statement file to Wrangler."""
+    if TRANSACTION_TOKEN.search(sql):
+        raise SystemExit("explicit transaction tokens are unsupported by D1 file import")
+    if sql.count("INSERT INTO users(") != EXPECTED_COUNT:
+        raise SystemExit("generated user statement-count gate failed")
+    if sql.count("INSERT INTO registrations(") != EXPECTED_COUNT:
+        raise SystemExit("generated registration statement-count gate failed")
+    if sql.count("UPDATE published_works SET published=0") != 1:
+        raise SystemExit("generated lineage statement-count gate failed")
+    public_ids = re.findall(r"VALUES\('([^']+)'", "\n".join(
+        line for line in sql.splitlines() if line.startswith("INSERT INTO registrations(")))
+    if len(public_ids) != EXPECTED_COUNT or len(set(public_ids)) != EXPECTED_COUNT:
+        raise SystemExit("generated public-id uniqueness gate failed")
+
+def wrangler_import_argv(database: str, sql_file: Path) -> list[str]:
+    """Return an argv vector; callers must not join it into a shell command."""
+    if not D1_DATABASE_NAME.fullmatch(database):
+        raise SystemExit("invalid D1 database confirmation")
+    sql_file = sql_file.resolve()
+    if sql_file.suffix.lower() != ".sql":
+        raise SystemExit("D1 import file must have a .sql suffix")
+    return ["npx", "wrangler", "d1", "execute", database, "--remote", f"--file={sql_file}"]
+
 def plan(args) -> dict:
     root = args.backup.resolve(); source = args.source.resolve()
     if source == root or source in root.parents: raise SystemExit("source and private backup must be separate")
@@ -137,15 +165,18 @@ def plan(args) -> dict:
     return {"rows": ordered, "dbHash": sha256(db), "stateHash": sha256(args.expected_state), "planHash": plan_hash, "reused": len(reused), "new": len(missing), "con": con}
 
 def render_sql(p: dict) -> str:
-    lines = ["PRAGMA foreign_keys=ON;", "BEGIN IMMEDIATE;"]
+    # Wrangler sends files to D1's dedicated /import ingestion API. Explicit SQLite
+    # transaction statements are rejected by remote D1 (nested transaction).
+    lines = ["PRAGMA foreign_keys=ON;"]
     for x in p["rows"]:
         lines.append("INSERT INTO users(discord_user_id,username_snapshot,display_name_snapshot,roles_json,roles_checked_at,created_at,updated_at) VALUES("+",".join(map(q,[x["owner"],x["username"],x["display"],"[]",x["updated"],x["created"],x["updated"]]))+") ON CONFLICT(discord_user_id) DO NOTHING;")
         values=[x["publicId"],x["owner"],x["title"],x["category"],x["description"],x["contact"],x["key"],x["name"],x["contentType"],x["size"],x["sha256"],"active",0,1,x["created"],x["updated"],x["displayOrder"],1]
         lines.append("INSERT INTO registrations(public_id,discord_user_id,title,category,description,contact_email,audio_object_key,audio_original_name,audio_content_type,audio_size,audio_sha256,audio_state,is_test,published,created_at,updated_at,display_order,preserve_audio_object) VALUES("+",".join(map(q,values))+") ON CONFLICT(discord_user_id) DO NOTHING;")
     ids=",".join(q(x["publicId"]) for x in p["rows"] if x["displayOrder"] in {int(y["displayOrder"]) for y in p["rows"]})
     lines.append(f"UPDATE published_works SET published=0 WHERE published=1 AND public_id IN ({ids}) AND EXISTS (SELECT 1 FROM registrations r WHERE r.public_id=published_works.public_id AND r.audio_sha256=published_works.audio_sha256 AND r.audio_size=published_works.audio_size AND r.published=1);")
-    lines.append("COMMIT;")
-    return "\n".join(lines)+"\n"
+    sql = "\n".join(lines)+"\n"
+    validate_import_sql(sql)
+    return sql
 
 def main() -> None:
     ap=argparse.ArgumentParser()

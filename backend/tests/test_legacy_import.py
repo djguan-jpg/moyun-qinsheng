@@ -19,7 +19,67 @@ def test_sql_escapes_and_orders_deactivation_after_owned_rows():
         rows.append({"owner":f"owner-{i}","username":"u'", "display":"d", "title":"t'", "category":"c", "description":"", "contact":"x@example.test", "key":f"key-{i}", "name":f"audio-{i}", "contentType":"audio/mpeg", "size":i, "sha256":hashlib.sha256(str(i).encode()).hexdigest(), "created":"2026-01-01T00:00:00Z", "updated":"2026-01-01T00:00:00Z", "displayOrder":i, "publicId":f"legacy-{i:03d}", "isNew":i>14})
     sql=MOD.render_sql({"rows":rows})
     assert "u''" in sql and sql.index("INSERT INTO registrations") < sql.index("UPDATE published_works")
-    assert sql.startswith("PRAGMA foreign_keys=ON;\nBEGIN IMMEDIATE;") and sql.endswith("COMMIT;\n")
+    assert sql.startswith("PRAGMA foreign_keys=ON;\n")
+    assert not MOD.TRANSACTION_TOKEN.search(sql)
+    MOD.validate_import_sql(sql)
+
+def test_generated_batch_validation_rejects_missing_duplicate_and_count_mismatch():
+    rows=[]
+    for i in range(1,21):
+        rows.append({"owner":f"owner-{i}","username":"u", "display":"d", "title":"t", "category":"c", "description":"", "contact":"", "key":f"key-{i}", "name":f"audio-{i}", "contentType":"audio/mpeg", "size":i, "sha256":hashlib.sha256(str(i).encode()).hexdigest(), "created":"2026-01-01T00:00:00Z", "updated":"2026-01-01T00:00:00Z", "displayOrder":i, "publicId":f"legacy-{i:03d}", "isNew":i>14})
+    sql=MOD.render_sql({"rows":rows})
+    bad=["BEGIN;\n"+sql, sql.replace("INSERT INTO users(","INSERT INTO userz(",1),
+         sql.replace("'legacy-002'","'legacy-001'",1), sql.replace("UPDATE published_works SET published=0","UPDATE published_works SET published=1")]
+    for value in bad:
+        try: MOD.validate_import_sql(value)
+        except SystemExit: pass
+        else: raise AssertionError("malformed generated batch unexpectedly accepted")
+
+def test_wrangler_4_file_argv_preserves_windows_spaces_without_shell_quoting(tmp_path):
+    sql=tmp_path/"private output"/"import file.sql"
+    sql.parent.mkdir()
+    sql.write_text("SELECT 1;",encoding="utf-8")
+    argv=MOD.wrangler_import_argv("exact-production-name",sql)
+    assert argv[:4]==["npx","wrangler","d1","execute"]
+    assert argv[4:6]==["exact-production-name","--remote"]
+    assert argv[6].startswith("--file=") and "private output" in argv[6]
+    assert '"' not in argv[6] and "wrangler" in argv
+
+def test_transaction_gate_covers_all_control_tokens_and_argv_parameters(tmp_path):
+    for token in ("BEGIN;", "COMMIT;", "END;", "ROLLBACK;", "SAVEPOINT x;", "RELEASE x;"):
+        try: MOD.validate_import_sql(token)
+        except SystemExit: pass
+        else: raise AssertionError(f"transaction token accepted: {token}")
+    sql=tmp_path/"file.sql"
+    for database,path in (("--help",sql),("bad name",sql),("valid-db",tmp_path/"file.txt")):
+        try: MOD.wrangler_import_argv(database,path)
+        except SystemExit: pass
+        else: raise AssertionError("invalid Wrangler argv parameters accepted")
+
+def _rows():
+    return [{"owner":f"owner-{i}","username":"u", "display":"d", "title":"t", "category":"c", "description":"", "contact":"", "key":f"key-{i}", "name":f"audio-{i}", "contentType":"audio/mpeg", "size":i, "sha256":hashlib.sha256(str(i).encode()).hexdigest(), "created":"2026-01-01T00:00:00Z", "updated":"2026-01-01T00:00:00Z", "displayOrder":i, "publicId":f"legacy-{i:03d}", "isNew":i>14} for i in range(1,21)]
+
+def _apply_batch(db, sql, fail_at=None):
+    statements=[x.strip() for x in sql.split(";") if x.strip()]
+    with db:
+        for index, statement in enumerate(statements):
+            if index == fail_at: statement="INSERT INTO definitely_missing_table VALUES(1)"
+            db.execute(statement)
+
+def test_documented_batch_model_rolls_back_middle_failure_and_reruns_idempotently(tmp_path):
+    db=sqlite3.connect(tmp_path/"atomic.db")
+    for migration in sorted((ROOT/"migrations").glob("*.sql")):
+        db.executescript(migration.read_text(encoding="utf-8"))
+    sql=MOD.render_sql({"rows":_rows()})
+    try: _apply_batch(db,sql,fail_at=20)
+    except sqlite3.OperationalError: pass
+    else: raise AssertionError("injected middle-statement failure was accepted")
+    assert db.execute("SELECT count(*) FROM users").fetchone()==(0,)
+    assert db.execute("SELECT count(*) FROM registrations").fetchone()==(0,)
+    _apply_batch(db,sql); _apply_batch(db,sql)
+    assert db.execute("SELECT count(*),count(DISTINCT discord_user_id) FROM users").fetchone()==(20,20)
+    assert db.execute("SELECT count(*),count(DISTINCT discord_user_id),count(DISTINCT public_id) FROM registrations WHERE audio_state='active'").fetchone()==(20,20,20)
+    assert db.execute("PRAGMA foreign_key_check").fetchall()==[]
 
 def test_private_ledger_is_create_only_and_count_only_summary(tmp_path):
     target=tmp_path/"ledger"
