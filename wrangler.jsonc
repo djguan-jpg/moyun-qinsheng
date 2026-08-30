@@ -5,12 +5,15 @@
   "main": "src/worker.js",
   "workers_dev": true,
   "preview_urls": false,
+  "vars": {
+    "CANONICAL_ORIGIN": "https://contest.zoeg.studio"
+  },
   "assets": {
     "directory": "dist",
     "binding": "ASSETS",
-    "run_worker_first": ["/api/*", "/auth/*", "/register", "/works", "/vote", "/admin", "/admin/*", "/media/submissions/*", "/robots.txt"]
+    "run_worker_first": ["/", "/api/*", "/auth/*", "/register", "/works", "/vote", "/admin", "/admin/*", "/media/submissions/*", "/robots.txt"]
   },
-  "d1_databases": [{ "binding": "DB", "database_name": "guyun-contest-prod", "database_id": "REPLACE_AT_DEPLOYMENT" }],
+  "d1_databases": [{ "binding": "DB", "database_name": "guyun-contest-prod", "database_id": "c38beccf-0828-402d-90a7-8b00107fb58c" }],
   "r2_buckets": [{ "binding": "AUDIO", "bucket_name": "guyun-contest-audio-prod" }],
   "routes": [
     {

@@ -85,6 +85,7 @@ updateAdminCurrentTime();
 window.setInterval(updateAdminCurrentTime, 1000);
 
 function getRequestedView() {
+  if (window.location.pathname === '/works') return 'works';
   return window.location.hash.slice(1).split('?')[0];
 }
 

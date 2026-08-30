@@ -10,7 +10,7 @@ class MemoryD1{constructor(){this.counts=new Map();this.public=[{public_id:'lega
 const env=()=>({
   CANONICAL_ORIGIN:'https://contest.example',CAPABILITY_SECRET:'capability-test-secret',DB:new MemoryD1(),
   AUDIO:{async get(key,opt){const all=new TextEncoder().encode('abcdef'),range=opt?.range,bytes=range?all.slice(range.offset,range.offset+range.length):all;return {body:bytes,arrayBuffer:async()=>bytes.buffer};}},
-  ASSETS:{fetch:r=>new Response(`asset:${new URL(r.url).pathname}`)}
+  ASSETS:{fetch:r=>new Response(`asset:${new URL(r.url).pathname}`,{headers:{'content-type':new URL(r.url).pathname.endsWith('.html')?'text/html; charset=utf-8':'text/plain'}})}
 });
 const call=(url,init={},e=env())=>worker.fetch(new Request(`https://contest.example${url}`,{...init,headers:{'CF-Connecting-IP':'203.0.113.9',...(init.headers||{})}}),e,{});
 test('actual Worker public competition succeeds without Discord Access or Turnstile config',async()=>{const e=env(),r=await call('/api/public/competition?contest=guyun',{},e);assert.equal(r.status,200);const j=await r.json();assert.equal(j.works.length,1);assert.deepEqual(Object.keys(j.works[0]),['publicId','listenUrl']);assert.match(j.works[0].listenUrl,/token=/);assert.equal(r.headers.get('x-content-type-options'),'nosniff')});

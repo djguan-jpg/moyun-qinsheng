@@ -6,6 +6,8 @@ CREATE TABLE published_works (
   audio_content_type TEXT NOT NULL,
   audio_size INTEGER NOT NULL CHECK(audio_size > 0),
   audio_sha256 TEXT NOT NULL CHECK(length(audio_sha256) = 64),
+  owner_discord_user_id TEXT,
+  ownership_status TEXT NOT NULL DEFAULT 'pending_legacy_reconciliation' CHECK(ownership_status = 'pending_legacy_reconciliation'),
   published INTEGER NOT NULL DEFAULT 1 CHECK(published IN (0,1)),
   source_manifest_id TEXT NOT NULL,
   created_at TEXT NOT NULL
