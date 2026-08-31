@@ -18,7 +18,6 @@ from typing import Any, Mapping, Protocol, Sequence
 from tools.production_state_machine import LIVE_BOOLEAN_GATES, LIVE_COUNT_GATES, UploadOutcome
 
 PINNED_WRANGLER = "4.127.1"
-SOURCE_COMMIT = "dffbc5c40afa20815bfc7f5063f6b7f3e35c7997"
 CANONICAL_DOMAIN = "contest.zoeg.studio"
 MIGRATION_PATH = "migrations/0005_owned_legacy_import.sql"
 MIGRATION_SHA256 = "533524c6b292f89329f501e25df0a869ef85f8e22c1d348dfcac11b9a5da8948"
@@ -26,10 +25,48 @@ MIGRATION_PROVENANCE = "https://developers.cloudflare.com/d1/reference/migration
 QUERY_LABELS = frozenset({"baseline:0004", "migration:0005", "post_import", "post_rollback"})
 PREFLIGHT_FIELDS = frozenset({"account_match", "zone_match", "worker_match", "d1_match", "r2_match", "canonical_domain_match", "resource_ids_match"})
 SENSITIVE_WORDS = re.compile(r"(?i)(token|owner|discord|e-?mail|secret|api[_-]?key|sql|private|manifest|path)")
+GENERATED_GIT_DIRECTORIES = ("node_modules/", "dist/", ".wrangler/")
+GENERATED_GIT_FILES = frozenset({"worker-configuration.d.ts"})
 
 
 class ProductionSafetyError(RuntimeError):
     """A public, category-only error; raw provider output is never attached."""
+
+
+def _verify_source_checkout(repo: os.PathLike[str] | str, expected_commit: str) -> bool:
+    if type(expected_commit) is not str or re.fullmatch(r"[0-9a-f]{40}", expected_commit) is None:
+        return False
+    try:
+        root = Path(repo).resolve(strict=True)
+        def git(*args: str) -> str:
+            completed = subprocess.run(
+                ["git", "-C", str(root), *args], shell=False, text=True,
+                encoding="utf-8", errors="strict", capture_output=True, check=False,
+            )
+            if completed.returncode != 0:
+                raise RuntimeError
+            return completed.stdout.strip()
+
+        if Path(git("rev-parse", "--show-toplevel")).resolve(strict=True) != root:
+            return False
+        if git("rev-parse", "--verify", "HEAD") != expected_commit:
+            return False
+        if not git("symbolic-ref", "-q", "HEAD").startswith("refs/heads/"):
+            return False
+        status = git("status", "--porcelain=v1", "--untracked-files=all", "--ignored=matching")
+        for line in status.splitlines():
+            if not line:
+                continue
+            if line[:3] in {"!! ", "?? "}:
+                path = line[3:].replace("\\", "/")
+                parts = tuple(part for part in path.rstrip("/").split("/") if part)
+                if (path in GENERATED_GIT_FILES or any(path.startswith(directory) for directory in GENERATED_GIT_DIRECTORIES)
+                        or "__pycache__" in parts):
+                    continue
+            return False
+        return True
+    except Exception:
+        return False
 
 
 def _str(value: Any, _name: str) -> str:
@@ -101,6 +138,12 @@ class ProductionExecutionConfig:
                 "migration_path", "migration_sha256"}
         data = _closed(raw, keys)
 
+        source_commit = _str(data["source_commit"], "source_commit")
+        if re.fullmatch(r"[0-9a-f]{40}", source_commit) is None:
+            raise ProductionSafetyError("CONFIG_INVALID")
+        if not _verify_source_checkout(repo, source_commit):
+            raise ProductionSafetyError("SOURCE_MISMATCH")
+
         def objects(value: Any) -> tuple[ObjectSpec, ...]:
             if type(value) is not list:
                 raise ProductionSafetyError("CONFIG_INVALID")
@@ -129,9 +172,6 @@ class ProductionExecutionConfig:
         for label in QUERY_LABELS:
             item = _closed(raw_queries[label], {"sql", "expected"})
             queries[label] = QuerySpec(_str(item["sql"], "sql"), item["expected"])
-        source_commit = _str(data["source_commit"], "source_commit")
-        if source_commit != SOURCE_COMMIT:
-            raise ProductionSafetyError("SOURCE_MISMATCH")
         import_sql = guard_existing_private(_str(data["import_sql"], "import_sql"), repo)
         token_file = guard_existing_private(_str(data["token_file"], "token_file"), repo)
         private_output = guard_new_private(_str(data["private_output"], "private_output"), repo)
@@ -347,7 +387,8 @@ class CloudflareProductionAdapter:
             return None
 
     def source_preflight(self) -> bool:
-        return (self.config.source_commit == SOURCE_COMMIT and _sha256(self.config.import_sql) == self.config.import_sql_sha256
+        return (_verify_source_checkout(self.repo, self.config.source_commit)
+                and _sha256(self.config.import_sql) == self.config.import_sql_sha256
                 and self.config.migration_sql == self.repo / MIGRATION_PATH
                 and self.config.migration_sql_sha256 == MIGRATION_SHA256
                 and _sha256(self.config.migration_sql) == MIGRATION_SHA256

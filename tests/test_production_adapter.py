@@ -14,7 +14,7 @@ from tools.production_adapter import (
     CloudflareProductionAdapter, CommandResult, CommandRunner, EvidenceRunner, ObjectSpec, QuerySpec,
     MIGRATION_PATH, MIGRATION_PROVENANCE, MIGRATION_SHA256, PINNED_WRANGLER,
     ProductionExecutionConfig, ProductionSafetyError,
-    ReceiptLedger, SOURCE_COMMIT, guard_existing_private, guard_new_private,
+    ReceiptLedger, _verify_source_checkout, guard_existing_private, guard_new_private,
     parse_custom_domains_disabled, parse_dev_url_disabled, parse_live_evidence,
     parse_object_metadata, parse_public_access, parse_resource_preflight, verify_object_file,
     verify_sqlite_export,
@@ -59,8 +59,16 @@ class AdapterTests(unittest.TestCase):
         self.t = tempfile.TemporaryDirectory()
         self.base = Path(self.t.name)
         self.repo = self.base / "repo"; self.repo.mkdir()
+        self.repo.joinpath(".gitignore").write_bytes(Path(__file__).resolve().parents[1].joinpath(".gitignore").read_bytes())
         self.migration = self.repo / MIGRATION_PATH; self.migration.parent.mkdir()
         self.migration.write_bytes((Path(__file__).resolve().parents[1] / MIGRATION_PATH).read_bytes())
+        subprocess.run(["git", "init", "-b", "main"], cwd=self.repo, check=True, capture_output=True)
+        subprocess.run(["git", "config", "user.email", "fixture"], cwd=self.repo, check=True)
+        subprocess.run(["git", "config", "user.name", "Source Integrity Test"], cwd=self.repo, check=True)
+        subprocess.run(["git", "add", "."], cwd=self.repo, check=True)
+        subprocess.run(["git", "commit", "-m", "fixture"], cwd=self.repo, check=True, capture_output=True)
+        self.source_commit = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.repo, check=True,
+                                            text=True, capture_output=True).stdout.strip()
         self.private = self.base / "private"; self.private.mkdir()
         self.out = self.private / "out"
         self.token = self.private / "token"; self.token.write_text("TOKEN_VALUE")
@@ -72,7 +80,7 @@ class AdapterTests(unittest.TestCase):
         self.legacy = tuple(self.spec(i, f"legacy-{i}") for i in range(14))
         self.new = tuple(self.spec(i + 14, f"new-{i}") for i in range(6))
         self.config = ProductionExecutionConfig(
-            "account", "zone", "worker", "database", "db-id", "bucket", "contest.zoeg.studio", SOURCE_COMMIT,
+            "account", "zone", "worker", "database", "db-id", "bucket", "contest.zoeg.studio", self.source_commit,
             self.legacy, self.new, tuple(f"owner-{i}" for i in range(20)), self.sql, digest(self.sql),
             {"baseline:0004": QuerySpec("SELECT 'baseline-fixture'", {"baseline": True}),
              "migration:0005": QuerySpec("SELECT 'migration-fixture'", {"migration": True}),
@@ -91,7 +99,7 @@ class AdapterTests(unittest.TestCase):
     def write_config(self, mutate=None):
         value = {
             "account_id":"account", "zone_id":"zone", "worker_name":"worker", "d1_name":"database", "d1_id":"db-id",
-            "r2_bucket":"bucket", "canonical_domain":"contest.zoeg.studio", "source_commit":SOURCE_COMMIT,
+            "r2_bucket":"bucket", "canonical_domain":"contest.zoeg.studio", "source_commit":self.source_commit,
             "legacy":[{"key":x.key,"source":str(x.source),"sha256":x.sha256,"size":x.size,"magic_hex":x.magic_hex,"mime":x.mime} for x in self.legacy],
             "new":[{"key":x.key,"source":str(x.source),"sha256":x.sha256,"size":x.size,"magic_hex":x.magic_hex,"mime":x.mime} for x in self.new],
             "owners":[f"owner-{i}" for i in range(20)], "import_sql":str(self.sql),
@@ -143,12 +151,55 @@ class AdapterTests(unittest.TestCase):
         self.assertIn("rollback-14-anon-0-owned-0-users-0-registrations", " ".join(runner.calls[0][0]))
 
     def test_config_counts_commit_and_provenance_fail_closed(self):
-        mutations = [lambda x:x.update(source_commit="0"*40), lambda x:x.update(legacy=x["legacy"][:-1]),
+        mutations = [lambda x:x.update(source_commit="0"*40), lambda x:x.update(source_commit="A"*40),
+                     lambda x:x.update(source_commit="a"*39), lambda x:x.update(legacy=x["legacy"][:-1]),
                      lambda x:x.update(new=x["new"][:-1]), lambda x:x.update(owners=x["owners"][:-1]),
                      lambda x:x.update(provenance=["http://unofficial.invalid/"])]
         for mutation in mutations:
             with self.subTest(mutation=mutation), self.assertRaises(ProductionSafetyError):
                 ProductionExecutionConfig.load(self.write_config(mutation), self.repo)
+
+    def test_source_commit_is_dynamic_head_not_a_static_trust_anchor(self):
+        self.assertTrue(_verify_source_checkout(self.repo, self.source_commit))
+        self.assertNotIn("SOURCE_COMMIT", Path(__file__).resolve().parents[1].joinpath("tools/production_adapter.py").read_text())
+        loaded = ProductionExecutionConfig.load(self.write_config(), self.repo)
+        self.assertEqual(loaded.source_commit, self.source_commit)
+
+    def test_source_checkout_rejects_malformed_uppercase_mismatch_and_detached(self):
+        for value in ("", "0" * 39, "G" * 40, self.source_commit.upper(), "0" * 40):
+            with self.subTest(value=value):
+                self.assertFalse(_verify_source_checkout(self.repo, value))
+        subprocess.run(["git", "checkout", "--detach"], cwd=self.repo, check=True, capture_output=True)
+        self.assertFalse(_verify_source_checkout(self.repo, self.source_commit))
+
+    def test_source_checkout_rejects_tracked_staged_and_untracked_source_or_config(self):
+        cases = ("modified", "staged", "untracked.py", "private-config.json")
+        for case in cases:
+            with self.subTest(case=case):
+                if case == "modified":
+                    self.migration.write_text("changed")
+                elif case == "staged":
+                    self.migration.write_text("changed"); subprocess.run(["git", "add", "."], cwd=self.repo, check=True)
+                else:
+                    (self.repo / case).write_text("unexpected")
+                self.assertFalse(_verify_source_checkout(self.repo, self.source_commit))
+                subprocess.run(["git", "reset", "--hard", "HEAD"], cwd=self.repo, check=True, capture_output=True)
+                for path in self.repo.glob("untracked.py"): path.unlink()
+                for path in self.repo.glob("private-config.json"): path.unlink()
+
+    def test_source_checkout_generated_allowlist_is_exact(self):
+        for name in ("node_modules", "dist", ".wrangler", "tools/__pycache__"):
+            path = self.repo / name; path.mkdir(parents=True); (path / "generated").write_text("x")
+        (self.repo / "worker-configuration.d.ts").write_text("generated")
+        self.assertTrue(_verify_source_checkout(self.repo, self.source_commit))
+        (self.repo / "other-generated.txt").write_text("x")
+        self.assertFalse(_verify_source_checkout(self.repo, self.source_commit))
+
+    def test_source_checkout_rejects_nested_repo_top_level_and_every_git_error(self):
+        nested = self.repo / "nested"; nested.mkdir()
+        self.assertFalse(_verify_source_checkout(nested, self.source_commit))
+        with mock.patch("subprocess.run", side_effect=OSError):
+            self.assertFalse(_verify_source_checkout(self.repo, self.source_commit))
 
     def test_config_and_specs_are_immutable_and_repr_redacted(self):
         with self.assertRaises(dataclasses.FrozenInstanceError): self.config.worker_name = "x"
