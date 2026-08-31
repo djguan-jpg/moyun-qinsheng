@@ -21,6 +21,8 @@ class Step(Enum):
     R2_PRIVATE_PROOF = auto()
     D1_BASELINE_PROOF = auto()
     OWNER_PLAN = auto()
+    APPLY_MIGRATION_0005 = auto()
+    VERIFY_MIGRATION_0005 = auto()
     UPLOAD_NEW_KEYS = auto()
     VERIFY_NEW_KEYS = auto()
     D1_IMPORT = auto()
@@ -37,6 +39,7 @@ class ErrorCategory(Enum):
     PREFLIGHT = auto()
     BACKUP = auto()
     PROOF = auto()
+    MIGRATION = auto()
     PLAN = auto()
     UPLOAD = auto()
     IMPORT = auto()
@@ -104,6 +107,7 @@ class RunResult:
     success: bool
     rolled_back: bool
     mutation_count: int
+    migration_count: int
     upload_count: int
     import_count: int
     deploy_count: int
@@ -127,8 +131,10 @@ class ProductionAdapter(Protocol):
     verify_d1_time_travel_export_restore: Callable[[], bool]
     verify_legacy_r2_backup: Callable[[tuple[str, ...]], bool]
     prove_r2_private: Callable[[], bool]
-    prove_d1_baseline_0005_compatible: Callable[[], bool]
+    prove_d1_baseline_0004: Callable[[], bool]
     dry_run_owner_reconcile: Callable[[int], bool]
+    apply_migration_0005_once: Callable[[], bool]
+    verify_migration_0005: Callable[[], bool]
     upload_new_key: Callable[[str], UploadOutcome]
     verify_new_keys: Callable[[tuple[str, ...]], bool]
     import_d1_once: Callable[[], bool]
@@ -161,14 +167,14 @@ def _live_gate_passes(evidence: object, expected_owners: int) -> bool:
 
 def run(plan: ProductionPlan, adapter: ProductionAdapter) -> RunResult:
     """Execute the fixed production sequence without retrying mutations."""
-    mutation_count = upload_count = import_count = deploy_count = 0
+    mutation_count = migration_count = upload_count = import_count = deploy_count = 0
     completed = Step.NOT_STARTED
     created: list[str] = []
-    import_called = deploy_called = False
+    migration_called = import_called = deploy_called = False
 
     def result(success: bool, category: ErrorCategory, rolled_back: bool = False,
                live_passed: bool = False) -> RunResult:
-        return RunResult(success, rolled_back, mutation_count, upload_count,
+        return RunResult(success, rolled_back, mutation_count, migration_count, upload_count,
                          import_count, deploy_count, completed, category, live_passed)
 
     def rollback() -> bool:
@@ -180,7 +186,7 @@ def run(plan: ProductionPlan, adapter: ProductionAdapter) -> RunResult:
                 outcomes.append(adapter.restore_worker() is True)
             except Exception:
                 outcomes.append(False)
-        if import_called:
+        if migration_called or import_called:
             try:
                 outcomes.append(adapter.restore_d1() is True)
             except Exception:
@@ -212,7 +218,7 @@ def run(plan: ProductionPlan, adapter: ProductionAdapter) -> RunResult:
          lambda: adapter.verify_legacy_r2_backup(plan.legacy_keys)),
         (Step.R2_PRIVATE_PROOF, ErrorCategory.PROOF, adapter.prove_r2_private),
         (Step.D1_BASELINE_PROOF, ErrorCategory.PROOF,
-         adapter.prove_d1_baseline_0005_compatible),
+         adapter.prove_d1_baseline_0004),
         (Step.OWNER_PLAN, ErrorCategory.PLAN,
          lambda: adapter.dry_run_owner_reconcile(plan.config.expected_owners)),
     )
@@ -224,6 +230,25 @@ def run(plan: ProductionPlan, adapter: ProductionAdapter) -> RunResult:
         if not ok:
             return result(False, category)
         completed = step
+
+    mutation_count += 1
+    migration_count = 1
+    migration_called = True
+    try:
+        migration_applied = adapter.apply_migration_0005_once() is True
+    except Exception:
+        migration_applied = False
+    if not migration_applied:
+        return result(False, ErrorCategory.MIGRATION, rollback())
+    completed = Step.APPLY_MIGRATION_0005
+
+    try:
+        migration_verified = adapter.verify_migration_0005() is True
+    except Exception:
+        migration_verified = False
+    if not migration_verified:
+        return result(False, ErrorCategory.MIGRATION, rollback())
+    completed = Step.VERIFY_MIGRATION_0005
 
     for key in plan.new_keys:
         mutation_count += 1

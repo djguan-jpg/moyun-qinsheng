@@ -12,7 +12,8 @@ from unittest import mock
 
 from tools.production_adapter import (
     CloudflareProductionAdapter, CommandResult, CommandRunner, EvidenceRunner, ObjectSpec, QuerySpec,
-    PINNED_WRANGLER, ProductionExecutionConfig, ProductionSafetyError,
+    MIGRATION_PATH, MIGRATION_PROVENANCE, MIGRATION_SHA256, PINNED_WRANGLER,
+    ProductionExecutionConfig, ProductionSafetyError,
     ReceiptLedger, SOURCE_COMMIT, guard_existing_private, guard_new_private,
     parse_custom_domains_disabled, parse_dev_url_disabled, parse_live_evidence,
     parse_object_metadata, parse_public_access, parse_resource_preflight, verify_object_file,
@@ -58,6 +59,8 @@ class AdapterTests(unittest.TestCase):
         self.t = tempfile.TemporaryDirectory()
         self.base = Path(self.t.name)
         self.repo = self.base / "repo"; self.repo.mkdir()
+        self.migration = self.repo / MIGRATION_PATH; self.migration.parent.mkdir()
+        self.migration.write_bytes((Path(__file__).resolve().parents[1] / MIGRATION_PATH).read_bytes())
         self.private = self.base / "private"; self.private.mkdir()
         self.out = self.private / "out"
         self.token = self.private / "token"; self.token.write_text("TOKEN_VALUE")
@@ -71,10 +74,12 @@ class AdapterTests(unittest.TestCase):
         self.config = ProductionExecutionConfig(
             "account", "zone", "worker", "database", "db-id", "bucket", "contest.zoeg.studio", SOURCE_COMMIT,
             self.legacy, self.new, tuple(f"owner-{i}" for i in range(20)), self.sql, digest(self.sql),
-            {"baseline:compatibility": QuerySpec("SELECT 'baseline-fixture'", {"baseline": True}),
+            {"baseline:0004": QuerySpec("SELECT 'baseline-fixture'", {"baseline": True}),
+             "migration:0005": QuerySpec("SELECT 'migration-fixture'", {"migration": True}),
              "post_import": QuerySpec("SELECT 'post-import-fixture'", {"imported": True}),
              "post_rollback": QuerySpec("SELECT 'rollback-14-anon-0-owned-0-users-0-registrations'", {"anonymous":14,"owned":0,"users":0,"registrations":0})},
-            ("https://developers.cloudflare.com/d1/wrangler-commands/",), self.out, self.token,
+            ("https://developers.cloudflare.com/d1/wrangler-commands/", MIGRATION_PROVENANCE), self.out, self.token,
+            self.migration, MIGRATION_SHA256,
         )
 
     def tearDown(self): self.t.cleanup()
@@ -91,11 +96,13 @@ class AdapterTests(unittest.TestCase):
             "new":[{"key":x.key,"source":str(x.source),"sha256":x.sha256,"size":x.size,"magic_hex":x.magic_hex,"mime":x.mime} for x in self.new],
             "owners":[f"owner-{i}" for i in range(20)], "import_sql":str(self.sql),
             "import_sql_sha256":digest(self.sql), "expected_queries":{
-                "baseline:compatibility":{"sql":"SELECT baseline_fixture","expected":{"baseline":True}},
+                "baseline:0004":{"sql":"SELECT baseline_fixture","expected":{"baseline":True}},
+                "migration:0005":{"sql":"SELECT migration_fixture","expected":{"migration":True}},
                 "post_import":{"sql":"SELECT post_import_fixture","expected":{"imported":True}},
                 "post_rollback":{"sql":"SELECT rollback_fixture","expected":{"anonymous":14,"owned":0,"users":0,"registrations":0}}},
-            "provenance":["https://developers.cloudflare.com/d1/wrangler-commands/"],
-            "private_output":str(self.out), "token_file":str(self.token)}
+            "provenance":["https://developers.cloudflare.com/d1/wrangler-commands/",MIGRATION_PROVENANCE],
+            "private_output":str(self.out), "token_file":str(self.token),
+            "migration_path":MIGRATION_PATH, "migration_sha256":MIGRATION_SHA256}
         if mutate: mutate(value)
         path = self.private / "config.json"; path.write_text(json.dumps(value)); return path
 
@@ -203,10 +210,58 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(runner.calls[2][0], ["d1","execute","database","--remote","--file",str(self.sql),"--yes"])
         self.assertEqual(runner.calls[3][0], ["deploy","--name","worker","--strict"])
 
+    def test_migration_apply_exact_once_and_schema_verification(self):
+        runner = FakeRunner(outputs={1: json.dumps({"migration": True})})
+        adapter = CloudflareProductionAdapter(self.config, self.repo, runner)
+        self.assertTrue(adapter.apply_migration_0005_once())
+        self.assertTrue(adapter.apply_migration_0005_once())
+        self.assertTrue(adapter.verify_migration_0005())
+        self.assertEqual(runner.calls[0][0], ["d1", "migrations", "apply", "database", "--remote"])
+        self.assertEqual(runner.calls[1][0], ["d1", "execute", "database", "--remote", "--command",
+                                              "SELECT 'migration-fixture'", "--json"])
+
+    def test_migration_nonzero_is_ambiguous_blocks_retry_and_has_private_receipt(self):
+        runner = FakeRunner(fail_at=0)
+        adapter = CloudflareProductionAdapter(self.config, self.repo, runner)
+        self.assertFalse(adapter.apply_migration_0005_once())
+        with self.assertRaisesRegex(ProductionSafetyError, "RECONCILE_NEEDED"):
+            adapter.apply_migration_0005_once()
+        self.assertEqual(len(runner.calls), 1)
+        receipt = (self.out / "mutation-receipts.json").read_text()
+        self.assertIn('"succeeded":false', receipt)
+        for value in (str(self.migration), self.migration.read_text(), str(self.out), "database", "account",
+                      self.token.read_text()):
+            self.assertNotIn(value, receipt)
+
+    def test_migration_accepted_reentry_requires_exact_receipt_and_schema(self):
+        first = CloudflareProductionAdapter(self.config, self.repo, FakeRunner())
+        self.assertTrue(first.apply_migration_0005_once())
+        runner = FakeRunner(outputs={0: json.dumps({"migration": True})})
+        resumed = CloudflareProductionAdapter(self.config, self.repo, runner)
+        self.assertTrue(resumed.apply_migration_0005_once())
+        self.assertEqual(runner.calls, [])
+        self.assertTrue(resumed.verify_migration_0005())
+        self.assertEqual(len(runner.calls), 1)
+
+        envelope = json.loads((self.out / "mutation-receipts.json").read_text())
+        envelope["payload"]["entries"][1]["fingerprint"] = "0" * 64
+        payload = json.dumps(envelope["payload"], sort_keys=True, separators=(",", ":")).encode()
+        envelope["sha256"] = hashlib.sha256(payload).hexdigest()
+        (self.out / "mutation-receipts.json").write_text(json.dumps(envelope))
+        with self.assertRaisesRegex(ProductionSafetyError, "RECONCILE_NEEDED"):
+            CloudflareProductionAdapter(self.config, self.repo, FakeRunner()).apply_migration_0005_once()
+
+    def test_migration_schema_mismatch_fails_closed(self):
+        runner = FakeRunner(outputs={1: json.dumps({"migration": False})})
+        adapter = CloudflareProductionAdapter(self.config, self.repo, runner)
+        self.assertTrue(adapter.apply_migration_0005_once())
+        self.assertFalse(adapter.verify_migration_0005())
+
     def test_nonzero_mutation_is_not_retried_and_receipt_blocks_reentry(self):
         runner = FakeRunner(fail_at=0); adapter = CloudflareProductionAdapter(self.config, self.repo, runner)
         self.assertFalse(adapter.import_d1_once()); self.assertEqual(len(runner.calls), 1)
-        with self.assertRaises(ProductionSafetyError): ReceiptLedger(self.out)
+        with self.assertRaises(ProductionSafetyError):
+            CloudflareProductionAdapter(self.config, self.repo, FakeRunner()).import_d1_once()
 
     def test_import_hash_failure_is_pre_mutation_and_rechecked_at_import(self):
         bad = dataclasses.replace(self.config, import_sql_sha256="0"*64)
@@ -384,7 +439,8 @@ class CliTests(AdapterTests):
 
     def test_live_accepted_requires_success_token_absent_and_evidence(self):
         config_path = self.write_config(); self.out.mkdir(); (self.out/"live-evidence.json").write_text("{}")
-        result = mock.Mock(success=True, rolled_back=False, mutation_count=8, upload_count=6, import_count=1, deploy_count=1, error_category=mock.Mock(name="NONE"))
+        result = mock.Mock(success=True, rolled_back=False, mutation_count=9, migration_count=1,
+                           upload_count=6, import_count=1, deploy_count=1, error_category=mock.Mock(name="NONE"))
         code, summary = execute(self.production_args(config_path), repo=self.repo, adapter_factory=mock.Mock(return_value=object()), run_core=mock.Mock(return_value=result))
         self.assertEqual(code, 0); self.assertTrue(summary["LIVE_ACCEPTED"]); self.assertTrue(summary["token_absent"])
 

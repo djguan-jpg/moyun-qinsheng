@@ -27,8 +27,9 @@ class FakeAdapter:
     operations = (
         "source_preflight", "config_preflight", "capture_worker_rollback_point",
         "verify_d1_time_travel_export_restore", "verify_legacy_r2_backup",
-        "prove_r2_private", "prove_d1_baseline_0005_compatible",
-        "dry_run_owner_reconcile", "verify_new_keys", "import_d1_once",
+        "prove_r2_private", "prove_d1_baseline_0004",
+        "dry_run_owner_reconcile", "apply_migration_0005_once", "verify_migration_0005",
+        "verify_new_keys", "import_d1_once",
         "post_import_reconcile", "deploy_once", "live_gate", "restore_worker",
         "restore_d1", "post_rollback_reconcile",
     )
@@ -55,10 +56,12 @@ class FakeAdapter:
         self.seen_legacy = keys
         return self._call("verify_legacy_r2_backup")
     def prove_r2_private(self): return self._call("prove_r2_private")
-    def prove_d1_baseline_0005_compatible(self): return self._call("prove_d1_baseline_0005_compatible")
+    def prove_d1_baseline_0004(self): return self._call("prove_d1_baseline_0004")
     def dry_run_owner_reconcile(self, count):
         self.dry_count = count
         return self._call("dry_run_owner_reconcile")
+    def apply_migration_0005_once(self): return self._call("apply_migration_0005_once")
+    def verify_migration_0005(self): return self._call("verify_migration_0005")
     def upload_new_key(self, key):
         index = self.upload_index
         self.upload_index += 1
@@ -96,7 +99,7 @@ class ProductionStateMachineTests(unittest.TestCase):
         result = run(self.plan, adapter)
         self.assertTrue(result.success)
         self.assertFalse(result.rolled_back)
-        self.assertEqual((result.upload_count, result.import_count, result.deploy_count), (6, 1, 1))
+        self.assertEqual((result.mutation_count, result.upload_count, result.import_count, result.deploy_count), (9, 6, 1, 1))
         self.assertEqual(result.completed_step, Step.COMPLETE)
         self.assertTrue(result.live_gate_passed)
         self.assertEqual(adapter.upload_index, 6)
@@ -106,8 +109,9 @@ class ProductionStateMachineTests(unittest.TestCase):
         self.assertEqual(adapter.calls, [
             "source_preflight", "config_preflight", "capture_worker_rollback_point",
             "verify_d1_time_travel_export_restore", "verify_legacy_r2_backup",
-            "prove_r2_private", "prove_d1_baseline_0005_compatible",
-            "dry_run_owner_reconcile", *("upload_new_key" for _ in range(6)),
+            "prove_r2_private", "prove_d1_baseline_0004",
+            "dry_run_owner_reconcile", "apply_migration_0005_once", "verify_migration_0005",
+            *("upload_new_key" for _ in range(6)),
             "verify_new_keys", "import_d1_once", "post_import_reconcile",
             "deploy_once", "live_gate",
         ])
@@ -147,9 +151,22 @@ class ProductionStateMachineTests(unittest.TestCase):
                 self.assertTrue(set(adapter.deleted).isdisjoint(LEGACY))
                 self.assertEqual(result.upload_count, index + 1)
 
+    def test_migration_apply_and_verification_fail_restore_before_any_upload(self):
+        for failure in ("apply_migration_0005_once", "verify_migration_0005"):
+            with self.subTest(failure=failure):
+                adapter = FakeAdapter(fail=failure)
+                result = run(self.plan, adapter)
+                self.assertFalse(result.success)
+                self.assertEqual(result.mutation_count, 1)
+                self.assertEqual(result.upload_count, 0)
+                self.assertEqual(adapter.upload_index, 0)
+                self.assert_once(adapter, "apply_migration_0005_once")
+                self.assert_once(adapter, "restore_d1")
+                self.assertEqual(adapter.deleted, [])
+
     def test_verify_import_reconcile_deploy_failures_rollback(self):
         cases = {
-            "verify_new_keys": (0, 0),
+            "verify_new_keys": (1, 0),
             "import_d1_once": (1, 0),
             "post_import_reconcile": (1, 0),
             "deploy_once": (1, 1),

@@ -20,7 +20,10 @@ from tools.production_state_machine import LIVE_BOOLEAN_GATES, LIVE_COUNT_GATES,
 PINNED_WRANGLER = "4.127.1"
 SOURCE_COMMIT = "dffbc5c40afa20815bfc7f5063f6b7f3e35c7997"
 CANONICAL_DOMAIN = "contest.zoeg.studio"
-QUERY_LABELS = frozenset({"baseline:compatibility", "post_import", "post_rollback"})
+MIGRATION_PATH = "migrations/0005_owned_legacy_import.sql"
+MIGRATION_SHA256 = "533524c6b292f89329f501e25df0a869ef85f8e22c1d348dfcac11b9a5da8948"
+MIGRATION_PROVENANCE = "https://developers.cloudflare.com/d1/reference/migrations/"
+QUERY_LABELS = frozenset({"baseline:0004", "migration:0005", "post_import", "post_rollback"})
 PREFLIGHT_FIELDS = frozenset({"account_match", "zone_match", "worker_match", "d1_match", "r2_match", "canonical_domain_match", "resource_ids_match"})
 SENSITIVE_WORDS = re.compile(r"(?i)(token|owner|discord|e-?mail|secret|api[_-]?key|sql|private|manifest|path)")
 
@@ -82,6 +85,8 @@ class ProductionExecutionConfig:
     provenance: tuple[str, ...]
     private_output: Path = field(repr=False)
     token_file: Path = field(repr=False)
+    migration_sql: Path = field(repr=False)
+    migration_sql_sha256: str = field(repr=False)
 
     @classmethod
     def load(cls, filename: os.PathLike[str] | str, repo: os.PathLike[str] | str) -> "ProductionExecutionConfig":
@@ -92,7 +97,8 @@ class ProductionExecutionConfig:
             raise ProductionSafetyError("CONFIG_INVALID") from None
         keys = {"account_id", "zone_id", "worker_name", "d1_name", "d1_id", "r2_bucket", "canonical_domain",
                 "source_commit", "legacy", "new", "owners", "import_sql", "import_sql_sha256",
-                "expected_queries", "provenance", "private_output", "token_file"}
+                "expected_queries", "provenance", "private_output", "token_file",
+                "migration_path", "migration_sha256"}
         data = _closed(raw, keys)
 
         def objects(value: Any) -> tuple[ObjectSpec, ...]:
@@ -116,6 +122,7 @@ class ProductionExecutionConfig:
                 or len({x.key for x in legacy + new}) != 20
                 or type(provenance) is not list or not provenance
                 or any(type(x) is not str or not x.startswith("https://developers.cloudflare.com/") for x in provenance)
+                or MIGRATION_PROVENANCE not in provenance
                 or type(raw_queries) is not dict or set(raw_queries) != QUERY_LABELS):
             raise ProductionSafetyError("CONFIG_INVALID")
         queries: dict[str, QuerySpec] = {}
@@ -134,11 +141,17 @@ class ProductionExecutionConfig:
         canonical_domain = _str(data["canonical_domain"], "canonical_domain")
         if canonical_domain != CANONICAL_DOMAIN:
             raise ProductionSafetyError("CONFIG_INVALID")
+        if data["migration_path"] != MIGRATION_PATH or data["migration_sha256"] != MIGRATION_SHA256:
+            raise ProductionSafetyError("MIGRATION_MISMATCH")
+        migration_sql = (Path(repo).resolve(strict=True) / MIGRATION_PATH).resolve(strict=True)
+        if migration_sql != Path(repo).resolve(strict=True) / Path(MIGRATION_PATH) or not migration_sql.is_file():
+            raise ProductionSafetyError("MIGRATION_MISMATCH")
         return cls(_str(data["account_id"], "account_id"), _str(data["zone_id"], "zone_id"),
                    _str(data["worker_name"], "worker_name"), _str(data["d1_name"], "d1_name"),
                    _str(data["d1_id"], "d1_id"), _str(data["r2_bucket"], "r2_bucket"),
                    canonical_domain, source_commit, legacy, new,
-                   tuple(owners), import_sql, sql_hash, queries, tuple(provenance), private_output, token_file)
+                   tuple(owners), import_sql, sql_hash, queries, tuple(provenance), private_output, token_file,
+                   migration_sql, MIGRATION_SHA256)
 
 
 def _is_repo_outside(path: Path, repo: os.PathLike[str] | str) -> bool:
@@ -251,11 +264,22 @@ class EvidenceRunner:
 class ReceiptLedger:
     def __init__(self, directory: Path):
         self.directory = directory; self.path = directory / "mutation-receipts.json"; self.entries: list[dict[str, Any]] = []
-        if self.path.exists(): raise ProductionSafetyError("RECONCILE_NEEDED")
+        if self.path.exists():
+            try:
+                envelope = _closed(json.loads(self.path.read_bytes()), {"sha256", "payload"})
+                payload = _closed(envelope["payload"], {"entries"})
+                encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+                if envelope["sha256"] != hashlib.sha256(encoded).hexdigest() or type(payload["entries"]) is not list:
+                    raise ValueError
+                for entry in payload["entries"]:
+                    self.entries.append(_closed(entry, {"phase", "operation", "created", "succeeded", "fingerprint"}))
+            except Exception:
+                raise ProductionSafetyError("RECONCILE_NEEDED") from None
 
-    def flush(self, phase: str, operation: str, created: bool, succeeded: bool) -> None:
+    def flush(self, phase: str, operation: str, created: bool, succeeded: bool, fingerprint: str = "") -> None:
         self.directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-        self.entries.append({"phase": phase, "operation": operation, "created": created, "succeeded": succeeded})
+        self.entries.append({"phase": phase, "operation": operation, "created": created, "succeeded": succeeded,
+                             "fingerprint": fingerprint})
         payload = json.dumps({"entries": self.entries}, sort_keys=True, separators=(",", ":")).encode()
         envelope = json.dumps({"sha256": hashlib.sha256(payload).hexdigest(), "payload": json.loads(payload)}, sort_keys=True, separators=(",", ":")).encode()
         fd, tmp = tempfile.mkstemp(prefix=".receipt-", dir=self.directory)
@@ -264,6 +288,19 @@ class ReceiptLedger:
             os.replace(tmp, self.path)
         finally:
             if os.path.exists(tmp): os.unlink(tmp)
+
+    def migration_accepted(self, fingerprint: str) -> bool:
+        if not self.entries:
+            return False
+        expected = [
+            {"phase": "before", "operation": "d1-migration-0005", "created": False,
+             "succeeded": False, "fingerprint": fingerprint},
+            {"phase": "after", "operation": "d1-migration-0005", "created": False,
+             "succeeded": True, "fingerprint": fingerprint},
+        ]
+        if self.entries != expected:
+            raise ProductionSafetyError("RECONCILE_NEEDED")
+        return True
 
 
 class CloudflareProductionAdapter:
@@ -283,7 +320,9 @@ class CloudflareProductionAdapter:
     def _mutate(self, operation: str, args: list[str], *, creates: bool = False) -> bool:
         if operation in self.attempted: return False
         self.attempted.add(operation)
-        if self.ledger is None: self.ledger = ReceiptLedger(self.config.private_output)
+        if self.ledger is None:
+            self.ledger = ReceiptLedger(self.config.private_output)
+            if self.ledger.entries: raise ProductionSafetyError("RECONCILE_NEEDED")
         self.ledger.flush("before", operation, False, False)
         ok = self._run(args, operation + ".raw", mutation=True)
         self.ledger.flush("after", operation, bool(creates and ok), ok)
@@ -309,6 +348,9 @@ class CloudflareProductionAdapter:
 
     def source_preflight(self) -> bool:
         return (self.config.source_commit == SOURCE_COMMIT and _sha256(self.config.import_sql) == self.config.import_sql_sha256
+                and self.config.migration_sql == self.repo / MIGRATION_PATH
+                and self.config.migration_sql_sha256 == MIGRATION_SHA256
+                and _sha256(self.config.migration_sql) == MIGRATION_SHA256
                 and all(_sha256(x.source) == x.sha256 and x.source.stat().st_size == x.size
                         and x.source.read_bytes().startswith(bytes.fromhex(x.magic_hex)) for x in self.config.legacy + self.config.new))
 
@@ -367,11 +409,33 @@ class CloudflareProductionAdapter:
         try: return json.loads(self._evidence(f"query-{safe}.raw").read_text())
         except Exception: return None
 
-    def prove_d1_baseline_0005_compatible(self) -> bool:
-        spec = self.config.expected_queries["baseline:compatibility"]
-        return self._query("baseline:compatibility") == spec.expected
+    def prove_d1_baseline_0004(self) -> bool:
+        spec = self.config.expected_queries["baseline:0004"]
+        return self._query("baseline:0004") == spec.expected
 
     def dry_run_owner_reconcile(self, count: int) -> bool: return count == 20 and len(self.config.owners) == count
+
+    def apply_migration_0005_once(self) -> bool:
+        fingerprint = self.config.migration_sql_sha256
+        if self.ledger is None:
+            self.ledger = ReceiptLedger(self.config.private_output)
+        if self.ledger.migration_accepted(fingerprint):
+            return True
+        operation = "d1-migration-0005"
+        if operation in self.attempted or self.ledger.entries:
+            return False
+        self.attempted.add(operation)
+        self.ledger.flush("before", operation, False, False, fingerprint)
+        ok = self._run(["d1", "migrations", "apply", self.config.d1_name, "--remote"],
+                       operation + ".raw", mutation=True)
+        self.ledger.flush("after", operation, False, ok, fingerprint)
+        return ok
+
+    def verify_migration_0005(self) -> bool:
+        if self.ledger is None or not self.ledger.migration_accepted(self.config.migration_sql_sha256):
+            return False
+        spec = self.config.expected_queries["migration:0005"]
+        return self._query("migration:0005") == spec.expected
 
     def upload_new_key(self, key: str) -> UploadOutcome:
         index = next((i for i, x in enumerate(self.config.new) if x.key == key), None)
