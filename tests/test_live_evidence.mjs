@@ -34,7 +34,7 @@ test('preflight derives every closed boolean from exact fixture fields', async (
   const args = {'account-id':'acct','zone-id':'zone','worker':'worker','d1-name':'db','d1-id':'did','r2-bucket':'bucket','domain':'contest.zoeg.studio'};
   const shapes = {
     [p+'user/tokens/verify']:{status:'active'}, [p+'zones/zone']:{id:'zone',account:{id:'acct'}},
-    [p+'accounts/acct/workers/services/worker']:{name:'worker'}, [p+'accounts/acct/d1/database/did']:{uuid:'did',name:'db'},
+    [p+'accounts/acct/workers/services/worker']:{id:'worker'}, [p+'accounts/acct/d1/database/did']:{uuid:'did',name:'db'},
     [p+'accounts/acct/r2/buckets/bucket']:{name:'bucket'}, [p+'accounts/acct/workers/domains']:[{service:'worker',hostname:'contest.zoeg.studio',zone_id:'zone'}],
   };
   const requested=[];
@@ -42,9 +42,27 @@ test('preflight derives every closed boolean from exact fixture fields', async (
   assert.deepEqual(good,{account_match:true,zone_match:true,worker_match:true,d1_match:true,r2_match:true,canonical_domain_match:true,resource_ids_match:true});
   assert.ok(requested.includes(p+'user/tokens/verify'));
   assert.ok(!requested.includes(p+'accounts/acct/tokens/verify'));
+  const workerPath=p+'accounts/acct/workers/services/worker';
+  for(const worker of [
+    {id:'worker'},
+    {default_environment:{script:{id:'worker'}}},
+    {default_environment:{script:{name:'worker'}}},
+    {name:'worker'},
+  ]) assert.equal((await cloudflarePreflight(args,'secret',fixtureFetch({...shapes,[workerPath]:worker}))).worker_match,true);
+  for(const worker of [
+    {},
+    {id:'wrong'},
+    {id:'work'},
+    {id:'worker-extra'},
+    {id:'Worker'},
+    {default_environment:{}},
+    {default_environment:{script:{id:'WORKER'}}},
+    {default_environment:{script:{name:'work'}}},
+    {name:'worker-extra'},
+  ]) assert.equal((await cloudflarePreflight(args,'secret',fixtureFetch({...shapes,[workerPath]:worker}))).worker_match,false);
   for (const [path, replacement] of Object.entries({
     [p+'zones/zone']:{id:'wrong',account:{id:'acct'}},
-    [p+'accounts/acct/workers/services/worker']:{name:'wrong'},
+    [workerPath]:{id:'wrong'},
     [p+'accounts/acct/r2/buckets/bucket']:{name:'wrong'},
   })) {
     const result = await cloudflarePreflight(args,'secret',fixtureFetch({...shapes,[path]:replacement}));
