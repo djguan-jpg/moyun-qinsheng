@@ -309,8 +309,21 @@ class AdapterTests(unittest.TestCase):
         self.assertTrue(verify_sqlite_export(good)); self.assertFalse(verify_sqlite_export(bad)); self.assertFalse(verify_sqlite_export(malformed))
 
     def test_public_access_parsers_strict(self):
-        self.assertTrue(parse_dev_url_disabled("R2.dev URL: disabled\n")); self.assertTrue(parse_dev_url_disabled("not enabled"))
-        for text in ("enabled", "disabled extra", "", '{"enabled":false}'):
+        for text in (
+            "disabled", "not enabled", "R2.dev URL: disabled\n",
+            "Public access via the r2.dev URL is disabled.",
+            "PUBLIC ACCESS VIA THE R2.DEV URL IS DISABLED.",
+            "  Public   access via the r2.dev URL is   disabled.  ",
+            "Public access via the r2.dev URL is disabled.\n",
+        ):
+            self.assertTrue(parse_dev_url_disabled(text))
+        for text in (
+            "Public access via the r2.dev URL is disabled. extra",
+            "Public access via the r2.dev URL is enabled.",
+            "Public access via r2.dev URL is disabled.",
+            '{"message":"Public access via the r2.dev URL is disabled."}',
+            "",
+        ):
             self.assertFalse(parse_dev_url_disabled(text))
         self.assertTrue(parse_custom_domains_disabled('{"dev_url_disabled":true,"custom_domains_disabled":true}'))
         for text in ('{"dev_url_disabled":true,"custom_domains_disabled":false}', '{"success":true,"result":[]}', '{"dev_url_disabled":true,"custom_domains_disabled":true,"extra":1}', 'no'):

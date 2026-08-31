@@ -508,7 +508,13 @@ def verify_sqlite_export(sql_path: Path) -> bool:
 
 
 def parse_dev_url_disabled(text: str) -> bool:
-    return bool(re.fullmatch(r"(?:r2\.dev url: )?(?:disabled|not enabled)", " ".join(text.lower().split())))
+    normalized = " ".join(text.lower().split())
+    return normalized in {
+        "disabled",
+        "not enabled",
+        "r2.dev url: disabled",
+        "public access via the r2.dev url is disabled.",
+    }
 
 
 def parse_custom_domains_disabled(payload: str) -> bool:
