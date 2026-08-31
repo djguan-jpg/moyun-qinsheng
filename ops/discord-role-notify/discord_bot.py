@@ -424,7 +424,7 @@ class ContestBot(commands.Bot):
             view.add_item(
                 discord.ui.Button(
                     label="前往古韻新生投稿",
-                    url="https://moyun.161-33-185-80.sslip.io/guyun/register",
+                    url="https://contest.zoeg.studio/register",
                     emoji="🎤",
                 )
             )

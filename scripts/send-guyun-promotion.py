@@ -15,7 +15,9 @@ GUILD = "977834861761015808"
 CHANNEL = "1404736020834156584"
 BOT = "1480491798215528492"
 ROLE_CHANNEL = "1512078123297144963"
-BASE = "https://moyun.161-33-185-80.sslip.io/guyun"
+
+BASE = "https://contest.zoeg.studio"
+
 TITLE = "古韻新生｜投稿開放・匿名聆聽上線"
 RECEIPT = Path("/data/guyun-promotion-20260826-1404736020834156584.json")
 

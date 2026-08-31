@@ -13,7 +13,9 @@ CHANNEL = "1404736020834156584"
 BOT = "1480491798215528492"
 ROLE = "977847655759765514"
 ROLE_NAME = "❇️｜AI創作者"
-BASE = "https://moyun.161-33-185-80.sslip.io/guyun"
+
+BASE = "https://contest.zoeg.studio"
+
 WHEN = datetime(2026, 8, 27, 4, 0, tzinfo=timezone.utc)
 EXPIRES = WHEN + timedelta(minutes=15)
 NONCE = "guyun-20260827-noon-ai"

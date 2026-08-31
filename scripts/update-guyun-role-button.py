@@ -13,7 +13,9 @@ MESSAGE = "1542161616999555183"
 BOT = "1480491798215528492"
 RECIPIENT = "320407142765166602"
 CUSTOM_ID = "guyun:request-music-role:kris:v1"
-BASE = "https://moyun.161-33-185-80.sslip.io/guyun"
+
+BASE = "https://contest.zoeg.studio"
+
 TITLE = "古韻新生｜投稿開放・匿名聆聽上線"
 LABEL = "通知 Kris 申請身分組"
 FIELD = "🎵 還沒有音樂身分組？"

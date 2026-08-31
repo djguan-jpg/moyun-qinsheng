@@ -16,7 +16,9 @@ GUILD_ID = "977834861761015808"
 CHANNEL_ID = "1404736020834156584"
 BOT_ID = "1480491798215528492"
 CREATOR_ROLE_ID = "980054891600969748"
-BASE_URL = "https://moyun.161-33-185-80.sslip.io/guyun"
+
+BASE_URL = "https://contest.zoeg.studio"
+
 TITLE = "古韻新生｜網站服務已恢復・投稿延長 48 小時"
 RECEIPT = Path("/data/guyun-recovery-extension-20260828.json")
 

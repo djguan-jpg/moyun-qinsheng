@@ -17,7 +17,9 @@ MESSAGE_ID = 1542161616999555183
 RECIPIENT_ID = 320407142765166602  # Existing ROLE_REQUEST_ADMIN_IDS: Kris / kris5205
 ROLE_ID = 980054891600969748
 CUSTOM_ID = "guyun:request-music-role:kris:v1"
-BASE_URL = "https://moyun.161-33-185-80.sslip.io/guyun"
+
+BASE_URL = "https://contest.zoeg.studio"
+
 ANNOUNCEMENT_URL = f"https://discord.com/channels/{GUILD_ID}/{CHANNEL_ID}/{MESSAGE_ID}"
 
 
