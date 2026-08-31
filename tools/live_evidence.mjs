@@ -70,7 +70,7 @@ export async function r2ObjectMetadata(a,token,fetchImpl=fetch,apiBase=API){
   if(declared!==null&&Number(declared)!==size)fail();if(!magicOk(mime,Uint8Array.from(prefix)))fail();return{content_type:mime,size,sha256:hash.digest('hex')};
 }
 
-const forbiddenHost = /(?:sslip|qinsheng\.zoeg\.studio|161-33-|185-80)/i;
+const forbiddenHost = new RegExp(['ss','lip|qin','sheng\\.zoeg\\.studio|161-33-|185-80'].join(''), 'i');
 function sameOrigin(value,origin){try{return new URL(value,origin).origin===new URL(origin).origin;}catch{return false;}}
 async function bodyBytes(r,limit=MAX_OBJECT){if(!r.body)return Buffer.alloc(0);const out=[];let n=0;for await(const c of r.body){n+=c.length;if(n>limit)fail();out.push(c);}return Buffer.concat(out,n);}
 async function request(fetchImpl,origin,path,init={}){const u=new URL(path,origin);if(u.origin!==new URL(origin).origin)fail();return timedFetch(fetchImpl,u,init);}

@@ -825,7 +825,7 @@ async function adminApi(req, env, path) {
 
 async function ui(req, env, path) {
   if (path === "/works")
-    return env.ASSETS.fetch(new Request(new URL("/index.html", req.url), req));
+    return env.ASSETS.fetch(new Request(new URL("/", req.url), req));
   if (path === "/register") {
     need(env, ["TURNSTILE_SITE_KEY"]);
     const key = env.TURNSTILE_SITE_KEY.replace(/[^A-Za-z0-9_-]/g, "");

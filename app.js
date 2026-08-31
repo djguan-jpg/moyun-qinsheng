@@ -1,18 +1,20 @@
 const viewButtons = document.querySelectorAll('[data-view]');
 const views = document.querySelectorAll('.view');
 const navLinks = document.querySelectorAll('.main-nav a');
-const liveDataConfig = window.MOYUN_BACKEND_CONFIG || {};
-const liveDataApiBaseUrl = String(liveDataConfig.apiBaseUrl || '').replace(/\/+$/, '');
-const registrationApiBaseUrl = String(liveDataConfig.registrationApiBaseUrl || '').replace(/\/+$/, '');
 let liveAdminSnapshot = null;
 
+const WORKS_PATH = '/works';
+const PUBLIC_COMPETITION_PATH = '/api/public/competition?contest=guyun';
+
+function workerPath(value, pattern) {
+  if (typeof value !== 'string' || !value.startsWith('/') || value.startsWith('//')) return '';
+  const url = new URL(value, window.location.origin);
+  if (url.origin !== window.location.origin || !pattern.test(`${url.pathname}${url.search}${url.hash}`)) return '';
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
 function openDiscordAdmin() {
-  const adminApiBaseUrl = registrationApiBaseUrl || liveDataApiBaseUrl;
-  if (!adminApiBaseUrl) {
-    showAdminToast('目前無法連接 Discord 管理後台，請稍後再試。');
-    return;
-  }
-  window.location.assign(`${adminApiBaseUrl}/admin`);
+  window.location.assign('/admin');
 }
 
 function showView(viewId, updateHash = true) {
@@ -152,30 +154,19 @@ function requestLiveDataAuthorization() {
 }
 
 function startDiscordRegistration() {
-  if (!registrationApiBaseUrl) {
-    showAdminToast('目前無法連接 Discord 報名服務，請稍後再試。');
-    return;
-  }
-  window.location.assign(`${registrationApiBaseUrl}/register`);
+  window.location.assign('/register');
 }
 
 function openPublicWorks() {
-  if (!registrationApiBaseUrl) {
-    showAdminToast('目前無法連接公開作品展演。');
-    return;
-  }
-  window.location.assign(`${registrationApiBaseUrl}/works`);
+  window.location.assign(WORKS_PATH);
 }
 
 function openLiveWorksManager() {
-  if (!liveDataApiBaseUrl) {
-    showAdminToast('目前無法連接作品上傳服務，請稍後再試。');
-    return;
-  }
-  const adminUrl = liveAdminSnapshot?.adminUrl || `${liveDataApiBaseUrl}/admin`;
-  const uploadUrl = new URL(adminUrl);
+  const adminUrl = workerPath(liveAdminSnapshot?.adminUrl || '/admin', /^\/admin(?:[?#].*)?$/);
+  if (!adminUrl) return showAdminToast('管理路徑無效，請重新載入。');
+  const uploadUrl = new URL(adminUrl, window.location.origin);
   uploadUrl.hash = 'proxy-registration';
-  window.location.assign(uploadUrl.toString());
+  window.location.assign(`${uploadUrl.pathname}${uploadUrl.search}${uploadUrl.hash}`);
 }
 
 document.querySelectorAll('[data-discord-register]').forEach((button) => {
@@ -185,9 +176,7 @@ document.querySelectorAll('[data-discord-register]').forEach((button) => {
   });
 });
 
-const publicCompetitionApiUrl = liveDataApiBaseUrl
-  ? `${liveDataApiBaseUrl}/api/public/competition?contest=guyun`
-  : '';
+const publicCompetitionApiUrl = PUBLIC_COMPETITION_PATH;
 const publicWorksContainer = document.querySelector('[data-public-works]');
 const scheduleContainer = document.querySelector('[data-competition-schedule]');
 let countdownTarget = scheduleContainer?.dataset.deadline
@@ -254,7 +243,9 @@ function createPublicWorkCard(work, index) {
   time.textContent = '0:00 / --:--';
   audio.className = 'work-audio';
   audio.preload = 'none';
-  audio.src = work.listenUrl;
+  const listenUrl = workerPath(work.listenUrl, /^\/api\/public\/audio\/[^/?#]+\?token=[^#&]+$/);
+  if (!listenUrl) throw new Error('invalid_public_audio_capability');
+  audio.src = listenUrl;
   audio.setAttribute('controlsList', 'nodownload');
 
   playButton.addEventListener('click', () => {
@@ -432,7 +423,8 @@ async function hydratePublicCompetition() {
   try {
     const response = await fetch(publicCompetitionApiUrl, {
       headers: { Accept: 'application/json' },
-      mode: 'cors',
+        credentials: 'same-origin',
+        redirect: 'error',
     });
     if (!response.ok) throw new Error(`Competition API returned ${response.status}`);
     const data = await response.json();
@@ -467,7 +459,7 @@ async function hydratePublicCompetition() {
 }
 
 async function shareCompetition(kind) {
-  const registrationUrl = `${registrationApiBaseUrl}/register`;
+  const registrationUrl = new URL('/register', window.location.origin).href;
   const messages = {
     share: '古韻新生古風音樂大賽現正開放投稿，以匿名投票讓每一段旋律公平被聽見。',
     invite: '邀請你參加「古韻新生」古風音樂大賽！只要擁有 Discord 音樂創作者身分即可投稿。',
@@ -490,7 +482,7 @@ document.querySelector('[data-share-discord]')?.addEventListener('click', () => 
 document.querySelector('[data-invite-creator]')?.addEventListener('click', () => shareCompetition('invite'));
 document.querySelector('[data-open-public-gallery]')?.addEventListener('click', openPublicWorks);
 document.querySelector('[data-open-official-vote]')?.addEventListener('click', () => {
-  if (liveDataApiBaseUrl) window.location.assign(`${liveDataApiBaseUrl}/vote`);
+  window.location.assign('/vote');
 });
 hydratePublicCompetition();
 
@@ -498,7 +490,7 @@ document.querySelector('[data-admin-add-work]')?.addEventListener('click', openL
 
 function initializeLiveDataControls() {
   const actionArea = document.querySelector('.admin-header > div:last-child');
-  if (!actionArea || !liveDataApiBaseUrl || document.querySelector('[data-live-data-connect]')) return;
+  if (!actionArea || document.querySelector('[data-live-data-connect]')) return;
   const button = document.createElement('button');
   button.type = 'button';
   button.className = 'admin-connect-data';
@@ -543,8 +535,8 @@ function createLiveDataActionCell() {
   button.className = 'row-link';
   button.textContent = '管理作品 ↗';
   button.addEventListener('click', () => {
-    const adminUrl = liveAdminSnapshot?.adminUrl || `${liveDataApiBaseUrl}/admin`;
-    window.open(adminUrl, '_blank', 'noopener');
+    const adminUrl = workerPath(liveAdminSnapshot?.adminUrl || '/admin', /^\/admin(?:[?#].*)?$/);
+    if (adminUrl) window.location.assign(adminUrl);
   });
   cell.append(button);
   return cell;
@@ -617,8 +609,8 @@ function renderLiveWorks(works) {
     button.type = 'button';
     button.textContent = '在 Discord 後台管理 ↗';
     button.addEventListener('click', () => {
-      const adminUrl = liveAdminSnapshot?.adminUrl || `${liveDataApiBaseUrl}/admin`;
-      window.open(adminUrl, '_blank', 'noopener');
+      const adminUrl = workerPath(liveAdminSnapshot?.adminUrl || '/admin', /^\/admin(?:[?#].*)?$/);
+      if (adminUrl) window.location.assign(adminUrl);
     });
     article.append(artwork, eyebrow, title, meta, button);
     return article;
