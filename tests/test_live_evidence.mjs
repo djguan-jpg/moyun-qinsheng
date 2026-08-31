@@ -33,20 +33,43 @@ test('preflight derives every closed boolean from exact fixture fields', async (
   const p = '/client/v4/';
   const args = {'account-id':'acct','zone-id':'zone','worker':'worker','d1-name':'db','d1-id':'did','r2-bucket':'bucket','domain':'contest.zoeg.studio'};
   const shapes = {
-    [p+'accounts/acct/tokens/verify']:{status:'active'}, [p+'zones/zone']:{id:'zone',account:{id:'acct'}},
+    [p+'user/tokens/verify']:{status:'active'}, [p+'zones/zone']:{id:'zone',account:{id:'acct'}},
     [p+'accounts/acct/workers/services/worker']:{name:'worker'}, [p+'accounts/acct/d1/database/did']:{uuid:'did',name:'db'},
     [p+'accounts/acct/r2/buckets/bucket']:{name:'bucket'}, [p+'accounts/acct/workers/domains']:[{service:'worker',hostname:'contest.zoeg.studio',zone_id:'zone'}],
   };
-  const good = await cloudflarePreflight(args,'secret',fixtureFetch(shapes));
+  const requested=[];
+  const good = await cloudflarePreflight(args,'secret',async(url,init)=>{requested.push(new URL(url).pathname);return fixtureFetch(shapes)(url,init);});
   assert.deepEqual(good,{account_match:true,zone_match:true,worker_match:true,d1_match:true,r2_match:true,canonical_domain_match:true,resource_ids_match:true});
+  assert.ok(requested.includes(p+'user/tokens/verify'));
+  assert.ok(!requested.includes(p+'accounts/acct/tokens/verify'));
   for (const [path, replacement] of Object.entries({
-    [p+'accounts/acct/tokens/verify']:{status:'disabled'}, [p+'zones/zone']:{id:'wrong',account:{id:'acct'}},
-    [p+'accounts/acct/workers/services/worker']:{name:'wrong'}, [p+'accounts/acct/d1/database/did']:{uuid:'wrong',name:'db'},
-    [p+'accounts/acct/r2/buckets/bucket']:{name:'wrong'}, [p+'accounts/acct/workers/domains']:[],
+    [p+'zones/zone']:{id:'wrong',account:{id:'acct'}},
+    [p+'accounts/acct/workers/services/worker']:{name:'wrong'},
+    [p+'accounts/acct/r2/buckets/bucket']:{name:'wrong'},
   })) {
     const result = await cloudflarePreflight(args,'secret',fixtureFetch({...shapes,[path]:replacement}));
     assert.ok(Object.values(result).includes(false));
   }
+  for (const replacement of [{id:'zone',account:{id:'wrong'}},{id:'zone',account:{}}]) {
+    assert.equal((await cloudflarePreflight(args,'secret',fixtureFetch({...shapes,[p+'zones/zone']:replacement}))).zone_match,false);
+  }
+  for (const replacement of [{uuid:'wrong',name:'db'},{uuid:'did',name:'wrong'}]) {
+    assert.equal((await cloudflarePreflight(args,'secret',fixtureFetch({...shapes,[p+'accounts/acct/d1/database/did']:replacement}))).d1_match,false);
+  }
+  for (const replacement of [
+    [{service:'wrong',hostname:'contest.zoeg.studio',zone_id:'zone'}],
+    [{service:'worker',hostname:'wrong.zoeg.studio',zone_id:'zone'}],
+    [{service:'worker',hostname:'contest.zoeg.studio',zone_id:'wrong'}],
+    [],
+  ]) assert.equal((await cloudflarePreflight(args,'secret',fixtureFetch({...shapes,[p+'accounts/acct/workers/domains']:replacement}))).canonical_domain_match,false);
+});
+
+test('preflight token verification requires active and fails closed on response errors', async () => {
+  const p='/client/v4/', args={'account-id':'acct','zone-id':'zone','worker':'worker','d1-name':'db','d1-id':'did','r2-bucket':'bucket','domain':'contest.zoeg.studio'};
+  const shapes={[p+'user/tokens/verify']:{status:'active'},[p+'zones/zone']:{id:'zone',account:{id:'acct'}},[p+'accounts/acct/workers/services/worker']:{name:'worker'},[p+'accounts/acct/d1/database/did']:{uuid:'did',name:'db'},[p+'accounts/acct/r2/buckets/bucket']:{name:'bucket'},[p+'accounts/acct/workers/domains']:[{service:'worker',hostname:'contest.zoeg.studio',zone_id:'zone'}]};
+  for(const status of ['disabled','expired'])assert.equal((await cloudflarePreflight(args,'secret',fixtureFetch({...shapes,[p+'user/tokens/verify']:{status}}))).account_match,false);
+  for(const status of [401,403])await assert.rejects(()=>cloudflarePreflight(args,'secret',async(url,init)=>new URL(url).pathname===p+'user/tokens/verify'?new Response('{}',{status}):fixtureFetch(shapes)(url,init)),/LIVE_EVIDENCE_ERROR/);
+  for(const body of ['not-json',JSON.stringify({success:true}),JSON.stringify({success:false,result:{status:'active'}})])await assert.rejects(()=>cloudflarePreflight(args,'secret',async(url,init)=>{if(new URL(url).pathname!==p+'user/tokens/verify')return fixtureFetch(shapes)(url,init);return new Response(body,{status:200,headers:{'content-length':String(body.length)}});}),/LIVE_EVIDENCE_ERROR/);
 });
 
 test('public access requires managed disabled and independently empty custom list', async () => {
