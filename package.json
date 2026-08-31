@@ -5,8 +5,8 @@
     "build": "node tools/build.mjs",
     "lfs:preflight": "node tools/lfs-preflight.mjs",
     "types": "wrangler types --env-interface CloudflareBindings",
-    "test": "node --test --test-concurrency=20 tests/*.test.js",
-    "check": "node --check src/worker.js && node --check src/security.js && node --check src/static/contest-ui.js && node --check tools/build.mjs && node --check tools/lfs-preflight.mjs && python -m py_compile tools/import_verified_legacy.py"
+    "test": "node --test --test-concurrency=20 tests/*.test.js tests/test_live_evidence.mjs",
+    "check": "node --check src/worker.js && node --check src/security.js && node --check src/static/contest-ui.js && node --check tools/build.mjs && node --check tools/lfs-preflight.mjs && node --check tools/live_evidence.mjs && python -m py_compile tools/import_verified_legacy.py tools/production_state_machine.py tools/production_adapter.py tools/production_complete.py"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "latest",
