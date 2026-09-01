@@ -352,7 +352,10 @@ async function competition(req, env) {
   need(env, ["CANONICAL_ORIGIN", "CAPABILITY_SECRET"]);
   await rate(env, "public-ip", clientIp(req), 120, 60);
   const u = new URL(req.url);
-  if (u.searchParams.get("contest") !== "guyun")
+  const contest = u.searchParams.has("contest")
+    ? u.searchParams.get("contest")
+    : "guyun";
+  if (contest !== "guyun")
     return json({ error: "unknown_contest" }, 404);
   const limit = Math.min(
       Math.max(Number(u.searchParams.get("limit") || 50) || 50, 1),
