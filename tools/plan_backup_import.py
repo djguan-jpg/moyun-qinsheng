@@ -1,6 +1,14 @@
 """Offline verified-backup reconciliation planner. Dry-run unless --apply is explicit."""
-import argparse, datetime, hashlib, json, os, secrets, sqlite3, subprocess, tempfile
+import argparse, datetime, hashlib, json, os, re, secrets, sqlite3, subprocess, tempfile
 from pathlib import Path
+
+TRANSACTION_CONTROL = re.compile(
+    r"(?im)^\s*(?:BEGIN|COMMIT|ROLLBACK|SAVEPOINT|RELEASE)\b"
+)
+
+def validate_wrangler_ingest_sql(sql):
+    if TRANSACTION_CONTROL.search(sql):
+        raise SystemExit('Wrangler D1 ingestion SQL contains transaction control')
 
 def digest(path):
     h=hashlib.sha256()
@@ -44,7 +52,7 @@ def main():
             if fn:
                 key=f"active/{secrets.token_urlsafe(24)}";object_keys[fn]=key
                 subprocess.run(['npx','wrangler','r2','object','put',f'{a.bucket}/{key}','--file',str(a.uploads/fn),'--remote'],check=True)
-        lines=['PRAGMA foreign_keys=ON;','BEGIN IMMEDIATE;']
+        lines=['PRAGMA foreign_keys=ON;']
         voter_ids={r[0] for r in con.execute('SELECT DISTINCT voter_discord_id FROM votes')}
         for r in rows:
             uid=r['discord_user_id'];created=r['created_at'];updated=r.get('updated_at') or created
@@ -60,8 +68,9 @@ def main():
         stage_ids={x:i for i,x in enumerate(sorted(stages),1)}
         for r in con.execute('SELECT id,registration_id,voter_discord_id,stage,created_at FROM votes'):
             lines.append(f"INSERT INTO votes(id,registration_id,voter_discord_id,stage_id,idempotency_key,created_at) VALUES({r[0]},{r[1]},{q(r[2])},{stage_ids[r[3]]},{q('legacy-'+str(r[0]))},{q(r[4])});")
-        plan_json=json.dumps(plan,ensure_ascii=False,separators=(',',':'));lines.append(f"INSERT INTO migration_imports VALUES({q(plan['snapshot_sha256'])},{q(a.sqlite.name)},{q(plan_json)},{counts['registrations']},{counts['votes']},{len(actual)},{q(now)});");lines.append('COMMIT;')
-        with tempfile.NamedTemporaryFile('w',suffix='.sql',encoding='utf-8',delete=False) as f: f.write('\n'.join(lines));sql_path=f.name
+        plan_json=json.dumps(plan,ensure_ascii=False,separators=(',',':'));lines.append(f"INSERT INTO migration_imports VALUES({q(plan['snapshot_sha256'])},{q(a.sqlite.name)},{q(plan_json)},{counts['registrations']},{counts['votes']},{len(actual)},{q(now)});")
+        sql='\n'.join(lines)+'\n';validate_wrangler_ingest_sql(sql)
+        with tempfile.NamedTemporaryFile('w',suffix='.sql',encoding='utf-8',delete=False) as f: f.write(sql);sql_path=f.name
         try: subprocess.run(['npx','wrangler','d1','execute',a.target,'--remote','--file',sql_path],check=True)
         finally: os.unlink(sql_path)
 
