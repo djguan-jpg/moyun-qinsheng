@@ -450,6 +450,10 @@ class AdapterTests(unittest.TestCase):
             (self.out/name).write_text("old")
             with self.subTest(name=name), self.assertRaisesRegex(ProductionSafetyError, "STALE_EVIDENCE"):
                 adapter._collect("live-gate", name, [], parse_live_evidence)
+        self.out.joinpath("live-evidence.json").unlink()
+        self.out.joinpath("live-evidence.json.gate.json").write_text('{"gate":"LIVE_DEFENSE"}')
+        with self.assertRaisesRegex(ProductionSafetyError, "STALE_EVIDENCE"):
+            adapter._collect("live-gate", "live-evidence.json", [], parse_live_evidence)
 
     def test_live_evidence_exact_schema_rejects_placeholder(self):
         runner = FakeRunner(); adapter = CloudflareProductionAdapter(self.config, self.repo, runner, FakeEvidenceRunner())

@@ -11,6 +11,9 @@ const ORIGIN = `https://${CANONICAL}`;
 const MAX_BODY = 1024 * 1024;
 const MAX_OBJECT = 9_671_575 + 65_536; // largest reviewed production manifest object + narrow margin
 const TIMEOUT_MS = 15_000;
+const AUDIO_WINDOW_WAIT_MS = 61_000;
+export const FUNCTIONAL_AUDIO_PACE_MS = 750;
+const MAX_AUDIO_REQUESTS_PER_WINDOW = 80;
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const COMMON = ['mode', 'output', 'nonce'];
 const MODES = Object.freeze({
@@ -21,8 +24,9 @@ const MODES = Object.freeze({
 });
 export const LIVE_BOOLEAN_GATES = Object.freeze(['homepage','works','public_owners','audio_get','audio_head','audio_range','audio_etag','audio_304','audio_416','tamper_denied','expiry_denied','legacy_static_denied','robots','not_found_404','rate_limit','csp','security_headers','owner_model','protected_routes_fail_closed','browser_dom_inventory','browser_network_inventory']);
 export const LIVE_COUNT_GATES = Object.freeze(['public_owner_count','audio_owner_count','old_link_occurrences']);
+export const LIVE_DIAGNOSTIC_GATES = Object.freeze(['LIVE_SETUP','LIVE_NON_VOLUME','LIVE_AUDIO_WINDOW_1','LIVE_AUDIO_WINDOW_WAIT_1','LIVE_AUDIO_WINDOW_2','LIVE_AUDIO_WINDOW_WAIT_2','LIVE_AUDIO_PACING','LIVE_DEFENSE']);
 
-export class EvidenceError extends Error {}
+export class EvidenceError extends Error { constructor(message,gate){super(message);this.gate=gate;} }
 const fail = () => { throw new EvidenceError('LIVE_EVIDENCE_ERROR'); };
 
 export function parseArgs(argv) {
@@ -83,40 +87,56 @@ function publicItems(value,origin){
   const ids=items.map(x=>x.publicId);if(new Set(ids).size!==20)fail();return{items,ids};
 }
 async function listing(fetchImpl,origin){const r=await request(fetchImpl,origin,'/api/public/competition?contest=guyun');let value;try{value=JSON.parse((await bodyBytes(r,MAX_BODY)).toString('utf8'));}catch{fail();}if(r.status!==200)fail();return publicItems(value,origin);}
-async function verifyAudio(fetchImpl,origin,item,checks){
+function functionalAudioRequester(fetchImpl,origin,paceFn){let requested=false;return async(path,init={})=>{if(requested)try{await paceFn(FUNCTIONAL_AUDIO_PACE_MS);}catch{throw new EvidenceError('LIVE_EVIDENCE_ERROR','LIVE_AUDIO_PACING');}requested=true;return request(fetchImpl,origin,path,init);};}
+async function verifyAudio(audioRequest,origin,item,checks){
   const u=new URL(item.listenUrl,origin),path=u.pathname+u.search;
-  const get=await request(fetchImpl,origin,path),bytes=await bodyBytes(get),etag=get.headers.get('etag'),len=get.headers.get('content-length'),type=normalizedMime(get.headers.get('content-type'));
+  const get=await audioRequest(path),bytes=await bodyBytes(get),etag=get.headers.get('etag'),len=get.headers.get('content-length'),type=normalizedMime(get.headers.get('content-type'));
   checks.get&&=get.status===200&&Number(len)===bytes.length&&magicOk(type,bytes.subarray(0,16));
-  const head=await request(fetchImpl,origin,path,{method:'HEAD'});checks.head&&=head.status===200&&(await bodyBytes(head)).length===0&&head.headers.get('content-length')===len&&head.headers.get('content-type')===get.headers.get('content-type');
-  const range=await request(fetchImpl,origin,path,{headers:{Range:'bytes=0-1'}}),rb=await bodyBytes(range);checks.range&&=range.status===206&&rb.length===2&&range.headers.get('content-range')===`bytes 0-1/${bytes.length}`;
-  checks.etag&&=typeof etag==='string'&&etag.length>2;const n304=await request(fetchImpl,origin,path,{headers:{'If-None-Match':etag||'invalid'}});checks.n304&&=n304.status===304&&(await bodyBytes(n304)).length===0;
-  const n416=await request(fetchImpl,origin,path,{headers:{Range:`bytes=${bytes.length}-`}});checks.n416&&=n416.status===416&&n416.headers.get('content-range')===`bytes */${bytes.length}`;
+  const head=await audioRequest(path,{method:'HEAD'});checks.head&&=head.status===200&&(await bodyBytes(head)).length===0&&head.headers.get('content-length')===len&&head.headers.get('content-type')===get.headers.get('content-type');
+  const range=await audioRequest(path,{headers:{Range:'bytes=0-1'}}),rb=await bodyBytes(range);checks.range&&=range.status===206&&rb.length===2&&range.headers.get('content-range')===`bytes 0-1/${bytes.length}`;
+  checks.etag&&=typeof etag==='string'&&etag.length>2;const n304=await audioRequest(path,{headers:{'If-None-Match':etag||'invalid'}});checks.n304&&=n304.status===304&&(await bodyBytes(n304)).length===0;
+  const n416=await audioRequest(path,{headers:{Range:`bytes=${bytes.length}-`}});checks.n416&&=n416.status===416&&n416.headers.get('content-range')===`bytes */${bytes.length}`;
 }
 
-export async function collectLiveGate(a,{fetchImpl=fetch,origin=ORIGIN,browserCollector=collectBrowserEvidence,edgeLauncher=spawn,cdpTransport,sleepFn=ms=>new Promise(r=>setTimeout(r,ms))}={}){
+async function waitForFreshAudioWindow(sleepFn){if(AUDIO_WINDOW_WAIT_MS>65_000)fail();try{await sleepFn(AUDIO_WINDOW_WAIT_MS);}catch{fail();}}
+async function proveTerminalDefense(fetchImpl,origin,item){
+  const u=new URL(item.listenUrl,origin),path=u.pathname+u.search;
+  const valid=await request(fetchImpl,origin,path,{method:'HEAD'});if(valid.status!==200||(await bodyBytes(valid)).length!==0)fail();
+  for(let count=2;count<=MAX_AUDIO_REQUESTS_PER_WINDOW+1;count++){
+    const probe=await request(fetchImpl,origin,path,{method:'HEAD'});
+    if(probe.status===403)return true;
+    if(probe.status===429){const retry=probe.headers.get('retry-after');return /^\d+$/.test(retry||'')&&Number(retry)>=1&&Number(retry)<=60;}
+    if(probe.status!==200||(await bodyBytes(probe)).length!==0)fail();
+  }
+  return false;
+}
+
+export async function collectLiveGate(a,{fetchImpl=fetch,origin=ORIGIN,browserCollector=collectBrowserEvidence,edgeLauncher=spawn,cdpTransport,sleepFn=ms=>new Promise(r=>setTimeout(r,ms)),paceFn=ms=>new Promise(r=>setTimeout(r,ms))}={}){
+  let gate='LIVE_SETUP';try{
   if(a.domain!==CANONICAL||a['r2-custom-domains-proof']!==true)fail();const injected=origin!==ORIGIN;if(!injected)origin=ORIGIN;
   const result=Object.fromEntries(LIVE_BOOLEAN_GATES.map(x=>[x,false]));Object.assign(result,{public_owner_count:0,audio_owner_count:0,old_link_occurrences:0});
+  gate='LIVE_NON_VOLUME';
   const home=await request(fetchImpl,origin,'/'),works=await request(fetchImpl,origin,'/works');const homeText=(await bodyBytes(home,MAX_BODY)).toString('utf8'),worksText=(await bodyBytes(works,MAX_BODY)).toString('utf8');
   result.homepage=home.status===200;result.works=works.status===200&&/href=["']\/works["']/.test(homeText);result.csp=!!home.headers.get('content-security-policy')&&!!works.headers.get('content-security-policy');result.security_headers=headersOk(home.headers)&&headersOk(works.headers);
   const first=await listing(fetchImpl,origin),items=first.items,ids=first.ids;result.owner_model=true;
   result.public_owner_count=ids.length;result.public_owners=true;result.audio_owner_count=items.length;
   const checks={get:true,head:true,range:true,etag:true,n304:true,n416:true,tamper:true,expiry:true};
-  for(const item of items.slice(0,4))await verifyAudio(fetchImpl,origin,item,checks);
-  const firstUrl=new URL(items[0].listenUrl,origin),bad=new URL(firstUrl);bad.searchParams.set('token',(bad.searchParams.get('token')||'x')+'x');checks.tamper=[401,403].includes((await request(fetchImpl,origin,bad.pathname+bad.search)).status);
-  const expired=new URL(firstUrl);expired.searchParams.set('token','expired.0.invalid');checks.expiry=[401,403].includes((await request(fetchImpl,origin,expired.pathname+expired.search)).status);
-  const waitMs=61_000;if(waitMs>65_000)fail();try{await sleepFn(waitMs);}catch{fail();}
-  const fresh=await listing(fetchImpl,origin);if(fresh.ids.some((id,i)=>id!==ids[i]))fail();
-  for(const item of fresh.items.slice(4))await verifyAudio(fetchImpl,origin,item,checks);
-  const probeUrl=new URL(fresh.items[4].listenUrl,origin),probe=await request(fetchImpl,origin,probeUrl.pathname+probeUrl.search,{method:'HEAD'}),retry=probe.headers.get('retry-after');
-  result.rate_limit=probe.status===429&&/^\d+$/.test(retry||'')&&Number(retry)>=1&&Number(retry)<=60;
-  Object.assign(result,{audio_get:checks.get,audio_head:checks.head,audio_range:checks.range,audio_etag:checks.etag,audio_304:checks.n304,audio_416:checks.n416,tamper_denied:checks.tamper,expiry_denied:checks.expiry});
   result.legacy_static_denied=(await Promise.all(['/media/submissions/probe.mp3','/media/probe.mp3','/guyun/media/probe.mp3'].map(p=>request(fetchImpl,origin,p)))).every(r=>[403,404].includes(r.status));
   const robots=await request(fetchImpl,origin,'/robots.txt'),robotText=(await bodyBytes(robots,MAX_BODY)).toString('utf8');result.robots=robots.status===200&&/Disallow:\s*\/api\//i.test(robotText);result.not_found_404=(await request(fetchImpl,origin,'/__live_evidence_fixed_404__')).status===404;
   const vote=await request(fetchImpl,origin,'/vote'),voteText=(await bodyBytes(vote,MAX_BODY)).toString('utf8');if(vote.status!==200||!/^\s*<!doctype html|<html[\s>]/i.test(voteText))fail();
   const protectedSpecs=[['GET','/register'],['GET','/admin'],['GET','/api/me/registration'],['POST','/api/registration'],['PUT','/api/registration/1'],['GET','/api/me/vote'],['PUT','/api/me/vote'],['POST','/auth/logout'],['GET','/api/admin/overview'],['GET','/api/admin/registrations'],['PUT','/api/admin/registrations/1'],['GET','/api/admin/votes'],['GET','/api/admin/audit'],['GET','/api/admin/export'],['GET','/api/admin/settings'],['PUT','/api/admin/settings'],['GET','/api/admin/schedule'],['PUT','/api/admin/schedule']];result.protected_routes_fail_closed=true;for(const [method,p]of protectedSpecs){const r=await request(fetchImpl,origin,p,{method});const text=(await bodyBytes(r,MAX_BODY)).toString('utf8');result.protected_routes_fail_closed&&=genericFailure(r,text);}
   const browser=await browserCollector({origin,allowInjectedOrigin:injected,edgeLauncher,cdpTransport}),pages=browser.pages;if(!Array.isArray(pages)||pages.length!==3||pages.some((p,i)=>p.path!==['/','/works','/vote'][i]||p.status!==200||!String(p.html).trim()))fail();
   const urls=pages.flatMap(p=>[...(p.urls||[]),...(p.resourceUrls||[])]),texts=pages.flatMap(p=>[p.html,...(p.redirectUrls||[]),...(p.failedUrls||[])]),all=[...urls,...texts];let old=0;for(const value of all){const s=String(value);old+=(s.match(new RegExp(forbiddenHost.source,'ig'))||[]).length;for(const match of s.matchAll(/https?:\/\/[^\s"'<>]+/ig))if(!sameOrigin(match[0],origin))old++;if(/challenges\.cloudflare\.com/i.test(s))old++;}old+=pages.reduce((n,p)=>n+(p.redirectUrls?.length||0)+(p.failedUrls?.length||0),0);result.old_link_occurrences=old;result.browser_network_inventory=urls.length>0&&old===0&&urls.every(x=>sameOrigin(x,origin));result.browser_dom_inventory=old===0&&pages.every(p=>String(p.html).length>0&&!/(?:href|src|action)=["'](?:https?:)?\/\//i.test(String(p.html).replaceAll(origin,'')));
-  if(Object.keys(result).length!==LIVE_BOOLEAN_GATES.length+LIVE_COUNT_GATES.length||LIVE_BOOLEAN_GATES.some(k=>result[k]!==true)||result.public_owner_count!==20||result.audio_owner_count!==20||result.old_link_occurrences!==0)fail();return result;
+  gate='LIVE_AUDIO_WINDOW_1';const firstAudioRequest=functionalAudioRequester(fetchImpl,origin,paceFn);for(const item of items.slice(0,10))await verifyAudio(firstAudioRequest,origin,item,checks);
+  const firstUrl=new URL(items[0].listenUrl,origin),bad=new URL(firstUrl);bad.searchParams.set('token',(bad.searchParams.get('token')||'x')+'x');
+  const expired=new URL(firstUrl);expired.searchParams.set('token','expired.0.invalid');checks.tamper=[401,403].includes((await firstAudioRequest(bad.pathname+bad.search)).status);checks.expiry=[401,403].includes((await firstAudioRequest(expired.pathname+expired.search)).status);
+  gate='LIVE_AUDIO_WINDOW_WAIT_1';await waitForFreshAudioWindow(sleepFn);
+  const fresh=await listing(fetchImpl,origin);if(fresh.ids.some((id,i)=>id!==ids[i]))fail();
+  gate='LIVE_AUDIO_WINDOW_2';const secondAudioRequest=functionalAudioRequester(fetchImpl,origin,paceFn);for(const item of fresh.items.slice(10))await verifyAudio(secondAudioRequest,origin,item,checks);
+  Object.assign(result,{audio_get:checks.get,audio_head:checks.head,audio_range:checks.range,audio_etag:checks.etag,audio_304:checks.n304,audio_416:checks.n416,tamper_denied:checks.tamper,expiry_denied:checks.expiry});
+  if(Object.keys(result).length!==LIVE_BOOLEAN_GATES.length+LIVE_COUNT_GATES.length||LIVE_BOOLEAN_GATES.filter(k=>k!=='rate_limit').some(k=>result[k]!==true)||result.public_owner_count!==20||result.audio_owner_count!==20||result.old_link_occurrences!==0)fail();
+  gate='LIVE_AUDIO_WINDOW_WAIT_2';await waitForFreshAudioWindow(sleepFn);gate='LIVE_DEFENSE';const terminal=await listing(fetchImpl,origin);if(terminal.ids.some((id,i)=>id!==ids[i]))fail();result.rate_limit=await proveTerminalDefense(fetchImpl,origin,terminal.items[0]);if(result.rate_limit!==true)fail();return result;
+  }catch(e){throw new EvidenceError('LIVE_EVIDENCE_ERROR',LIVE_DIAGNOSTIC_GATES.includes(e?.gate)?e.gate:gate);}
 }
 
 const EDGE_PATHS=['C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe','C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'];
@@ -141,5 +161,7 @@ export async function collectBrowserEvidence({origin,edgeLauncher=spawn,cdpTrans
 
 async function runMode(a,token){if(a.mode==='cloudflare-preflight')return cloudflarePreflight(a,token);if(a.mode==='r2-public-access')return publicAccess(a,token);if(a.mode==='r2-object-metadata')return r2ObjectMetadata(a,token);if(a.mode==='live-gate')return collectLiveGate(a);fail();}
 async function atomicWrite(path,envelope){const{target,parent}=await safeOutput(path),temp=join(parent,`.live-evidence-${randomBytes(16).toString('hex')}`);let h;try{h=await open(temp,'wx',0o600);await h.writeFile(JSON.stringify(envelope));await h.sync();await h.close();h=undefined;await chmod(temp,0o600).catch(()=>{});await rename(temp,target);const d=await open(parent,'r').catch(()=>null);if(d){await d.sync().catch(()=>{});await d.close();}}catch(e){if(h)await h.close().catch(()=>{});await unlink(temp).catch(()=>{});throw e;}}
-export async function main(argv=process.argv.slice(2)){const a=parseArgs(argv),token=process.env.CLOUDFLARE_API_TOKEN;if(typeof token!=='string'||!token)fail();await safeOutput(a.output);const result=await runMode(a,token);await atomicWrite(a.output,{nonce:a.nonce,result});}
+export function parseLiveDiagnostic(value){return value&&Object.keys(value).length===1&&LIVE_DIAGNOSTIC_GATES.includes(value.gate)?value.gate:null;}
+export async function writeLiveDiagnostic(path,value){const gate=parseLiveDiagnostic(value);if(!gate)fail();await atomicWrite(path,{gate});}
+export async function main(argv=process.argv.slice(2)){const a=parseArgs(argv),token=process.env.CLOUDFLARE_API_TOKEN;if(typeof token!=='string'||!token)fail();await safeOutput(a.output);try{const result=await runMode(a,token);await atomicWrite(a.output,{nonce:a.nonce,result});}catch(e){if(a.mode==='live-gate'&&parseLiveDiagnostic({gate:e?.gate}))await writeLiveDiagnostic(`${a.output}.gate.json`,{gate:e.gate});throw e;}}
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url))main().catch(()=>{process.stderr.write('LIVE_EVIDENCE_ERROR\n');process.exitCode=1;});

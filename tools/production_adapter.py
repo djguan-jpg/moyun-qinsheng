@@ -370,7 +370,9 @@ class CloudflareProductionAdapter:
 
     def _collect(self, mode: str, filename: str, args: Sequence[str], schema: Any) -> Any:
         target = self._evidence(filename)
-        if target.exists(): raise ProductionSafetyError("STALE_EVIDENCE")
+        diagnostic = Path(str(target) + ".gate.json") if mode == "live-gate" else None
+        if target.exists() or (diagnostic is not None and diagnostic.exists()):
+            raise ProductionSafetyError("STALE_EVIDENCE")
         started = __import__("time").time_ns()
         result = self.evidence_runner.collect(mode, target, self.run_nonce, args)
         if not result.ok or not target.is_file(): return None
