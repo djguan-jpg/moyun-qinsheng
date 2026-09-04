@@ -26,7 +26,7 @@ MIGRATION_PROVENANCE = "https://developers.cloudflare.com/d1/reference/migration
 QUERY_LABELS = frozenset({"baseline:0004", "migration:0005", "post_import", "post_rollback"})
 PREFLIGHT_FIELDS = frozenset({"account_match", "zone_match", "worker_match", "d1_match", "r2_match", "canonical_domain_match", "resource_ids_match"})
 SENSITIVE_WORDS = re.compile(r"(?i)(token|owner|discord|e-?mail|secret|api[_-]?key|sql|private|manifest|path)")
-GENERATED_GIT_DIRECTORIES = ("node_modules/", "dist/", ".wrangler/")
+GENERATED_GIT_DIRECTORIES = ("node_modules/", "dist/", ".wrangler/", ".pytest_cache/")
 GENERATED_GIT_FILES = frozenset({"worker-configuration.d.ts"})
 MAX_QUERY_JSON_BYTES = 1024 * 1024
 

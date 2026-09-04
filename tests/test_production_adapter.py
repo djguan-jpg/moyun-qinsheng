@@ -324,10 +324,13 @@ class AdapterTests(unittest.TestCase):
                 for path in self.repo.glob("private-config.json"): path.unlink()
 
     def test_source_checkout_generated_allowlist_is_exact(self):
-        for name in ("node_modules", "dist", ".wrangler", "tools/__pycache__"):
+        for name in ("node_modules", "dist", ".wrangler", ".pytest_cache", "tools/__pycache__"):
             path = self.repo / name; path.mkdir(parents=True); (path / "generated").write_text("x")
         (self.repo / "worker-configuration.d.ts").write_text("generated")
         self.assertTrue(_verify_source_checkout(self.repo, self.source_commit))
+        similar = self.repo / ".pytest_cache-other"; similar.mkdir(); (similar / "generated").write_text("x")
+        self.assertFalse(_verify_source_checkout(self.repo, self.source_commit))
+        shutil.rmtree(similar)
         (self.repo / "other-generated.txt").write_text("x")
         self.assertFalse(_verify_source_checkout(self.repo, self.source_commit))
 
