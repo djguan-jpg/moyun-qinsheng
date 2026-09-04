@@ -15,6 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Mapping, Protocol, Sequence
 
+from tools.import_verified_legacy import AuditProof, parse_canonical_audit_proof
 from tools.production_state_machine import LIVE_BOOLEAN_GATES, LIVE_COUNT_GATES, UploadOutcome
 
 PINNED_WRANGLER = "4.127.1"
@@ -91,6 +92,70 @@ def _closed(obj: Any, keys: set[str] | frozenset[str]) -> dict[str, Any]:
 class QuerySpec:
     sql: str = field(repr=False)
     expected: Any = field(repr=False)
+
+
+def canonical_post_import_query(proof: AuditProof) -> QuerySpec:
+    """Build the only permitted post-import query from fixed SQL and validated hex."""
+    values = (proof.import_id, proof.source_sha256, proof.expected_state_sha256)
+    if any(re.fullmatch(r"[0-9a-f]{64}", value) is None for value in values):
+        raise ProductionSafetyError("CONFIG_INVALID")
+    import_id, source_hash, plan_hash = values
+    sql = """WITH active_owned_rows AS (
+ SELECT * FROM registrations
+ WHERE published=1 AND is_test=0 AND audio_state='active' AND discord_user_id IS NOT NULL
+), retained_anonymous_rows AS (
+ SELECT * FROM published_works
+ WHERE published=0 AND owner_discord_user_id IS NULL
+)
+SELECT
+ (SELECT COUNT(*) FROM active_owned_rows) AS active_owned,
+ (SELECT COUNT(*) FROM users) AS users,
+ (SELECT COUNT(*) FROM registrations) AS registrations,
+ (SELECT COUNT(DISTINCT discord_user_id) FROM active_owned_rows) AS unique_owners,
+ (SELECT COUNT(*)-COUNT(DISTINCT discord_user_id) FROM active_owned_rows) AS duplicate_owners,
+ (SELECT COUNT(DISTINCT public_id) FROM active_owned_rows) AS unique_public_ids,
+ (SELECT COUNT(*)-COUNT(DISTINCT public_id) FROM active_owned_rows) AS duplicate_public_ids,
+ (SELECT COUNT(DISTINCT display_order) FROM active_owned_rows) AS unique_orders,
+ (SELECT COUNT(*)-COUNT(DISTINCT display_order) FROM active_owned_rows) AS duplicate_orders,
+ (SELECT COUNT(DISTINCT audio_object_key) FROM active_owned_rows) AS unique_objects,
+ (SELECT COUNT(*)-COUNT(DISTINCT audio_object_key) FROM active_owned_rows) AS duplicate_objects,
+ (SELECT COUNT(*) FROM active_owned_rows r WHERE EXISTS (
+   SELECT 1 FROM retained_anonymous_rows p
+   WHERE p.audio_object_key=r.audio_object_key AND p.audio_sha256=r.audio_sha256 AND p.audio_size=r.audio_size
+ )) AS reused_objects,
+ (SELECT COUNT(*) FROM active_owned_rows r WHERE NOT EXISTS (
+   SELECT 1 FROM retained_anonymous_rows p
+   WHERE p.audio_object_key=r.audio_object_key AND p.audio_sha256=r.audio_sha256 AND p.audio_size=r.audio_size
+ )) AS new_objects,
+ (SELECT COUNT(*) FROM retained_anonymous_rows) AS anonymous_inactive,
+ ((SELECT COUNT(*) FROM registrations WHERE published=1 AND is_test=0 AND discord_user_id IS NULL) + (SELECT COUNT(*) FROM published_works WHERE published=1 AND owner_discord_user_id IS NULL)) AS active_anonymous,
+ ((SELECT COUNT(*) FROM registrations r LEFT JOIN users u ON u.discord_user_id=r.discord_user_id WHERE r.published=1 AND r.is_test=0 AND r.discord_user_id IS NOT NULL AND u.discord_user_id IS NULL) + (SELECT COUNT(*) FROM published_works p LEFT JOIN users u ON u.discord_user_id=p.owner_discord_user_id WHERE p.published=1 AND p.owner_discord_user_id IS NOT NULL AND u.discord_user_id IS NULL)) AS active_orphan,
+ (SELECT COUNT(*) FROM pragma_foreign_key_check) AS foreign_key_violations,
+ (SELECT COUNT(*) FROM legacy_import_runs) AS audit_rows,
+ (SELECT COUNT(*) FROM legacy_import_runs
+  WHERE import_id='""" + import_id + "' AND source_sha256='" + source_hash + "' AND expected_state_sha256='" + plan_hash + """'
+  AND registration_count=20 AND reused_object_count=14 AND new_object_count=6
+  AND state='applied' AND applied_at IS NOT NULL AND rolled_back_at IS NULL) AS exact_audit;"""
+    expected = {"active_owned":20, "users":20, "registrations":20, "unique_owners":20,
+                "duplicate_owners":0, "unique_public_ids":20, "duplicate_public_ids":0,
+                "unique_orders":20, "duplicate_orders":0, "unique_objects":20,
+                "duplicate_objects":0, "reused_objects":14, "new_objects":6,
+                "anonymous_inactive":14, "active_anonymous":0, "active_orphan":0,
+                "foreign_key_violations":0, "audit_rows":1, "exact_audit":1}
+    return QuerySpec(sql, expected)
+
+
+def parse_wrangler_query_json(value: Any) -> dict[str, Any] | None:
+    """Accept only Wrangler's single-result, single-row JSON envelope."""
+    if type(value) is not list or len(value) != 1 or type(value[0]) is not dict:
+        return None
+    item = value[0]
+    if set(item) != {"results", "success", "meta"} or item["success"] is not True:
+        return None
+    if type(item["meta"]) is not dict or type(item["results"]) is not list or len(item["results"]) != 1:
+        return None
+    row = item["results"][0]
+    return row if type(row) is dict else None
 
 
 @dataclass(frozen=True)
@@ -177,6 +242,15 @@ class ProductionExecutionConfig:
         private_output = guard_new_private(_str(data["private_output"], "private_output"), repo)
         sql_hash = _str(data["import_sql_sha256"], "import_sql_sha256").lower()
         if not re.fullmatch(r"[0-9a-f]{64}", sql_hash):
+            raise ProductionSafetyError("CONFIG_INVALID")
+        if _sha256(import_sql) != sql_hash:
+            raise ProductionSafetyError("CONFIG_INVALID")
+        try:
+            proof = parse_canonical_audit_proof(import_sql.read_text(encoding="utf-8"))
+        except (Exception, SystemExit):
+            raise ProductionSafetyError("CONFIG_INVALID") from None
+        canonical_post_import = canonical_post_import_query(proof)
+        if queries["post_import"] != canonical_post_import:
             raise ProductionSafetyError("CONFIG_INVALID")
         canonical_domain = _str(data["canonical_domain"], "canonical_domain")
         if canonical_domain != CANONICAL_DOMAIN:
@@ -351,6 +425,15 @@ class CloudflareProductionAdapter:
         self.evidence_runner = evidence_runner or EvidenceRunner(self.repo, config.token_file)
         self.ledger: ReceiptLedger | None = None; self.worker_version: str | None = None; self.bookmark: str | None = None
         self.created: set[str] = set(); self.attempted: set[str] = set(); self.run_nonce = secrets.token_hex(32)
+        try:
+            if _sha256(config.import_sql) != config.import_sql_sha256:
+                raise ValueError
+            self.audit_proof = parse_canonical_audit_proof(config.import_sql.read_text(encoding="utf-8"))
+            self.post_import_spec = canonical_post_import_query(self.audit_proof)
+            if config.expected_queries["post_import"] != self.post_import_spec:
+                raise ValueError
+        except (Exception, SystemExit):
+            raise ProductionSafetyError("CONFIG_INVALID") from None
 
     def _evidence(self, name: str) -> Path: return self.config.private_output / name
 
@@ -391,6 +474,7 @@ class CloudflareProductionAdapter:
     def source_preflight(self) -> bool:
         return (_verify_source_checkout(self.repo, self.config.source_commit)
                 and _sha256(self.config.import_sql) == self.config.import_sql_sha256
+                and self.config.expected_queries["post_import"] == self.post_import_spec
                 and self.config.migration_sql == self.repo / MIGRATION_PATH
                 and self.config.migration_sql_sha256 == MIGRATION_SHA256
                 and _sha256(self.config.migration_sql) == MIGRATION_SHA256
@@ -449,7 +533,9 @@ class CloudflareProductionAdapter:
         spec = self.config.expected_queries[label]
         safe = label.replace(":", "-")
         if not self._run(["d1", "execute", self.config.d1_name, "--remote", "--command", spec.sql, "--json"], f"query-{safe}.raw"): return None
-        try: return json.loads(self._evidence(f"query-{safe}.raw").read_text())
+        try:
+            decoded = json.loads(self._evidence(f"query-{safe}.raw").read_text())
+            return parse_wrangler_query_json(decoded) if label == "post_import" else decoded
         except Exception: return None
 
     def prove_d1_baseline_0004(self) -> bool:
@@ -493,12 +579,17 @@ class CloudflareProductionAdapter:
         return set(keys) == set(specs) and all(self._verify_object(specs[k], f"verify-new-{i}.bin") for i, k in enumerate(keys))
 
     def import_d1_once(self) -> bool:
-        if _sha256(self.config.import_sql) != self.config.import_sql_sha256: return False
+        if (_sha256(self.config.import_sql) != self.config.import_sql_sha256
+                or self.config.expected_queries["post_import"] != self.post_import_spec): return False
+        try:
+            if parse_canonical_audit_proof(self.config.import_sql.read_text(encoding="utf-8")) != self.audit_proof:
+                return False
+        except (Exception, SystemExit):
+            return False
         return self._mutate("d1-import", ["d1", "execute", self.config.d1_name, "--remote", "--file", str(self.config.import_sql), "--yes"])
 
     def post_import_reconcile(self, count: int) -> bool:
-        spec = self.config.expected_queries["post_import"]
-        return count == 20 and self._query("post_import") == spec.expected
+        return count == 20 and self._query("post_import") == self.post_import_spec.expected
 
     def deploy_once(self) -> bool: return self._mutate("worker-deploy", ["deploy", "--name", self.config.worker_name, "--strict"])
 

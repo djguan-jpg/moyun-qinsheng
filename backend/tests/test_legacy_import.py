@@ -25,6 +25,30 @@ def test_sql_escapes_and_orders_deactivation_after_owned_rows():
     assert not MOD.TRANSACTION_TOKEN.search(sql)
     MOD.validate_import_sql(sql)
 
+def test_canonical_audit_parser_positive_redacted_and_negative_contracts():
+    source_hash, plan_hash = "a" * 64, "b" * 64
+    sql = MOD.render_sql({"rows":_rows(),"dbHash":source_hash,"planHash":plan_hash})
+    proof = MOD.parse_canonical_audit_proof(sql)
+    assert proof.source_sha256 == source_hash and proof.expected_state_sha256 == plan_hash
+    assert (proof.registration_count, proof.reused_object_count, proof.new_object_count, proof.state) == (20,14,6,"applied")
+    assert source_hash not in repr(proof) and plan_hash not in repr(proof)
+    audit = MOD.render_audit_sql(source_hash, plan_hash)
+    mutations = [
+        audit.replace(source_hash, "g" * 64, 1),
+        audit.replace(plan_hash, "f" * 63, 1),
+        audit.replace(",20,14,6,", ",19,14,6,"),
+        audit.replace("'applied'", "'prepared'", 1),
+        audit.replace("CURRENT_TIMESTAMP", "NULL", 1),
+    ]
+    for changed in mutations:
+        try: MOD.parse_canonical_audit_proof(sql.replace(audit, changed))
+        except SystemExit: continue
+        else: raise AssertionError("malformed audit was accepted")
+    for changed in (sql.replace(audit, ""), sql + audit + "\n"):
+        try: MOD.parse_canonical_audit_proof(changed)
+        except SystemExit: continue
+        else: raise AssertionError("missing/duplicate audit was accepted")
+
 def test_generated_batch_validation_rejects_missing_duplicate_and_count_mismatch():
     rows=[]
     for i in range(1,21):

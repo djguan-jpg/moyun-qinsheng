@@ -15,6 +15,30 @@ TRANSACTION_TOKEN = re.compile(
 D1_DATABASE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$")
 AUDIT_PREFIX = "legacy-import-v1"
 
+class AuditProof:
+    """Validated import audit identity. Values are deliberately repr-redacted."""
+    __slots__ = ("import_id", "source_sha256", "expected_state_sha256", "registration_count",
+                 "reused_object_count", "new_object_count", "state", "applied_timestamp",
+                 "rolled_back_timestamp")
+
+    def __init__(self, import_id, source_sha256, expected_state_sha256, registration_count,
+                 reused_object_count, new_object_count, state, applied_timestamp,
+                 rolled_back_timestamp):
+        for name, value in zip(self.__slots__, (import_id, source_sha256, expected_state_sha256,
+                               registration_count, reused_object_count, new_object_count, state,
+                               applied_timestamp, rolled_back_timestamp)):
+            object.__setattr__(self, name, value)
+
+    def __repr__(self):
+        return "AuditProof([REDACTED])"
+
+    def __eq__(self, other):
+        return type(other) is type(self) and all(getattr(self, name) == getattr(other, name)
+                                                for name in self.__slots__)
+
+    def __setattr__(self, name, value):
+        raise AttributeError("AuditProof is immutable")
+
 def sha256(path: Path) -> str:
     h = hashlib.sha256()
     with path.open("rb") as stream:
@@ -92,6 +116,20 @@ def load_state(path: Path) -> list[dict]:
     if len({x["publicId"] for x in works}) != REUSE_COUNT or len({x["displayOrder"] for x in works}) != REUSE_COUNT:
         raise SystemExit("expected-state uniqueness gate failed")
     return works
+
+def parse_canonical_audit_proof(sql: str) -> AuditProof:
+    """Validate canonical import SQL and return its sole audit proof."""
+    validate_import_sql(sql)
+    audit_line = next(line for line in sql.splitlines()
+                      if line.startswith("INSERT INTO legacy_import_runs("))
+    match = re.search(
+        r"VALUES\('([0-9a-f]{64})','([0-9a-f]{64})','([0-9a-f]{64})',"
+        r"(20),(14),(6),'(applied)',(CURRENT_TIMESTAMP),(NULL)\)", audit_line)
+    if match is None:
+        raise SystemExit("generated audit contract gate failed")
+    import_id, source_hash, plan_hash, registrations, reused, new, state, applied, rolled = match.groups()
+    return AuditProof(import_id, source_hash, plan_hash, int(registrations), int(reused), int(new),
+                      state, applied, None if rolled == "NULL" else rolled)
 
 def validate_import_sql(sql: str) -> None:
     """Fail closed before handing the already-atomic statement file to Wrangler."""
@@ -236,6 +274,7 @@ def main() -> None:
         sql=render_sql(p); atomic_private(args.private_output/"import.sql",sql)
         ledger={"schemaVersion":1,"state":"prepared","planSha256":p["planHash"],"sqlSha256":hashlib.sha256(sql.encode()).hexdigest(),"counts":{"registrations":20,"reusedObjects":14,"newObjects":6},"newObjects":[{"key":x["key"],"sha256":x["sha256"],"size":x["size"]} for x in p["rows"] if x["isNew"]]}
         atomic_private(args.private_output/"rollback-ledger.private.json",json.dumps(ledger,separators=(",",":"),sort_keys=True))
-    print(json.dumps({"accepted":True,"mode":args.mode,"counts":{"registrations":20,"reusedObjects":14,"newObjects":6},"planSha256":p["planHash"]},sort_keys=True))
+    print(json.dumps({"accepted":True,"mode":args.mode,
+                      "counts":{"registrations":20,"reusedObjects":14,"newObjects":6}},sort_keys=True))
 
 if __name__ == "__main__": main()

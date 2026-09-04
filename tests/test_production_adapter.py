@@ -14,11 +14,13 @@ from tools.production_adapter import (
     CloudflareProductionAdapter, CommandResult, CommandRunner, EvidenceRunner, ObjectSpec, QuerySpec,
     MIGRATION_PATH, MIGRATION_PROVENANCE, MIGRATION_SHA256, PINNED_WRANGLER,
     ProductionExecutionConfig, ProductionSafetyError,
+    canonical_post_import_query,
     ReceiptLedger, _verify_source_checkout, guard_existing_private, guard_new_private,
     parse_custom_domains_disabled, parse_dev_url_disabled, parse_live_evidence,
     parse_object_metadata, parse_public_access, parse_resource_preflight, verify_object_file,
     verify_sqlite_export,
 )
+from tools.import_verified_legacy import parse_canonical_audit_proof, render_audit_sql, render_sql
 from tools.production_complete import CONFIRMATIONS, execute
 from tools.production_state_machine import LIVE_BOOLEAN_GATES, LIVE_COUNT_GATES, ProductionPlan, run
 
@@ -72,7 +74,13 @@ class AdapterTests(unittest.TestCase):
         self.private = self.base / "private"; self.private.mkdir()
         self.out = self.private / "out"
         self.token = self.private / "token"; self.token.write_text("TOKEN_VALUE")
-        self.sql = self.private / "import.sql"; self.sql.write_text("CREATE TABLE t(id INTEGER PRIMARY KEY);")
+        source_hash, plan_hash = "a" * 64, "b" * 64
+        lines = ["PRAGMA foreign_keys=ON;"]
+        lines += [f"INSERT INTO users(id) VALUES({i});" for i in range(20)]
+        lines += [f"INSERT INTO registrations(public_id) VALUES('work-{i}');" for i in range(20)]
+        lines += ["UPDATE published_works SET published=0 WHERE 0;", render_audit_sql(source_hash, plan_hash)]
+        self.sql = self.private / "import.sql"; self.sql.write_text("\n".join(lines) + "\n")
+        self.post_import = canonical_post_import_query(parse_canonical_audit_proof(self.sql.read_text()))
         self.sources = []
         for i in range(20):
             p = self.private / f"audio-{i}.bin"; p.write_bytes(b"ID3" + bytes([i]))
@@ -84,7 +92,7 @@ class AdapterTests(unittest.TestCase):
             self.legacy, self.new, tuple(f"owner-{i}" for i in range(20)), self.sql, digest(self.sql),
             {"baseline:0004": QuerySpec("SELECT 'baseline-fixture'", {"baseline": True}),
              "migration:0005": QuerySpec("SELECT 'migration-fixture'", {"migration": True}),
-             "post_import": QuerySpec("SELECT 'post-import-fixture'", {"imported": True}),
+             "post_import": self.post_import,
              "post_rollback": QuerySpec("SELECT 'rollback-14-anon-0-owned-0-users-0-registrations'", {"anonymous":14,"owned":0,"users":0,"registrations":0})},
             ("https://developers.cloudflare.com/d1/wrangler-commands/", MIGRATION_PROVENANCE), self.out, self.token,
             self.migration, MIGRATION_SHA256,
@@ -106,7 +114,7 @@ class AdapterTests(unittest.TestCase):
             "import_sql_sha256":digest(self.sql), "expected_queries":{
                 "baseline:0004":{"sql":"SELECT baseline_fixture","expected":{"baseline":True}},
                 "migration:0005":{"sql":"SELECT migration_fixture","expected":{"migration":True}},
-                "post_import":{"sql":"SELECT post_import_fixture","expected":{"imported":True}},
+                "post_import":{"sql":self.post_import.sql,"expected":self.post_import.expected},
                 "post_rollback":{"sql":"SELECT rollback_fixture","expected":{"anonymous":14,"owned":0,"users":0,"registrations":0}}},
             "provenance":["https://developers.cloudflare.com/d1/wrangler-commands/",MIGRATION_PROVENANCE],
             "private_output":str(self.out), "token_file":str(self.token),
@@ -134,14 +142,92 @@ class AdapterTests(unittest.TestCase):
                 ProductionExecutionConfig.load(self.write_config(mutation), self.repo)
 
     def test_query_uses_fixture_sql_not_label_and_never_exposes_sql(self):
-        runner = FakeRunner(outputs={0: json.dumps({"imported":True})})
+        wrapper = [{"results":[self.post_import.expected],"success":True,"meta":{}}]
+        runner = FakeRunner(outputs={0: json.dumps(wrapper)})
         adapter = CloudflareProductionAdapter(self.config, self.repo, runner, FakeEvidenceRunner())
         self.assertTrue(adapter.post_import_reconcile(20))
         argv = runner.calls[0][0]
-        self.assertIn("SELECT 'post-import-fixture'", argv)
+        self.assertIn(self.post_import.sql, argv)
         self.assertNotIn("post_import", argv)
-        self.assertNotIn("post-import-fixture", repr(adapter.config))
+        self.assertNotIn(self.post_import.sql, repr(adapter.config))
         self.assertIsNone(adapter._query("unknown"))
+
+    def test_post_import_override_and_noncanonical_import_fail_before_mutation(self):
+        for mutation in (
+            lambda x: x["expected_queries"]["post_import"].update(sql="SELECT 1"),
+            lambda x: x.update(import_sql_sha256="0" * 64),
+        ):
+            runner = FakeRunner()
+            with self.subTest(mutation=mutation), self.assertRaises(ProductionSafetyError):
+                ProductionExecutionConfig.load(self.write_config(mutation), self.repo)
+            self.assertEqual(runner.calls, [])
+
+    def test_post_import_provider_requires_closed_envelope_and_exact_row(self):
+        good = self.post_import.expected
+        cases = [
+            ([{"results":[good],"success":True,"meta":{}}], True),
+            ([{"results":[],"success":True,"meta":{}}], False),
+            ([{"results":[good,good],"success":True,"meta":{}}], False),
+            ([{"results":[good],"success":True,"meta":{},"extra":1}], False),
+            ({"results":[good],"success":True,"meta":{}}, False),
+        ]
+        for key in good:
+            wrong = dict(good)
+            wrong[key] = 0 if good[key] != 0 else 1
+            cases.append(([{"results":[wrong],"success":True,"meta":{}}], False))
+        cases.append(([{"results":[{**good,"exact_timestamps":0}],"success":True,"meta":{}}], False))
+        cases.append(([{"results":[{**good,"extra_alias":0}],"success":True,"meta":{}}], False))
+        cases.append(([{"results":[list(good.values())],"success":True,"meta":{}}], False))
+        for payload, accepted in cases:
+            with self.subTest(payload=payload):
+                runner = FakeRunner(outputs={0: json.dumps(payload)})
+                adapter = CloudflareProductionAdapter(self.config, self.repo, runner, FakeEvidenceRunner())
+                self.assertEqual(adapter.post_import_reconcile(20), accepted)
+
+    def test_canonical_post_import_query_recomputes_data_and_audit_proof(self):
+        db = sqlite3.connect(self.base / "post-import.db")
+        db.row_factory = sqlite3.Row
+        for migration in sorted(Path(__file__).resolve().parents[1].joinpath("migrations").glob("*.sql")):
+            db.executescript(migration.read_text(encoding="utf-8"))
+        rows = [{"owner":f"owner-{i}", "username":"u", "display":"d", "title":"t", "category":"c",
+                 "description":"", "contact":"", "key":f"key-{i}", "name":f"audio-{i}",
+                 "contentType":"audio/mpeg", "size":i, "sha256":hashlib.sha256(str(i).encode()).hexdigest(),
+                 "created":"2026-01-01T00:00:00Z", "updated":"2026-01-01T00:00:00Z",
+                 "displayOrder":i, "publicId":f"legacy-{i:03d}", "isNew":i>14} for i in range(1,21)]
+        for row in rows[:14]:
+            db.execute("INSERT INTO published_works(public_id,display_order,audio_object_key,audio_content_type,audio_size,audio_sha256,source_manifest_id,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                       (row["publicId"],row["displayOrder"],row["key"],row["contentType"],row["size"],row["sha256"],"fixture",row["created"]))
+        plan = {"rows":rows, "dbHash":"c" * 64, "planHash":"d" * 64}
+        sql = render_sql(plan)
+        db.executescript(sql)
+        spec = canonical_post_import_query(parse_canonical_audit_proof(sql))
+
+        def result(): return dict(db.execute(spec.sql).fetchone())
+        self.assertEqual(result(), spec.expected)
+        self.assertTrue(all(type(value) is int for value in spec.expected.values()))
+        canonical_audit = tuple(db.execute("SELECT * FROM legacy_import_runs").fetchone())
+        db.execute("DELETE FROM legacy_import_runs")
+        self.assertEqual((result()["audit_rows"], result()["exact_audit"]), (0,0))
+        db.execute("INSERT INTO legacy_import_runs VALUES(?,?,?,?,?,?,?,?,?)", canonical_audit)
+
+        db.execute("INSERT INTO legacy_import_runs VALUES(?,?,?,?,?,?,?,?,?)",
+                   ("e"*64,"f"*64,"0"*64,20,14,6,"applied","2026-01-01",None))
+        self.assertEqual(result()["audit_rows"], 2)
+        db.execute("DELETE FROM legacy_import_runs WHERE import_id=?", ("e"*64,))
+        db.execute("UPDATE legacy_import_runs SET expected_state_sha256=?", ("e"*64,))
+        missing = result()
+        self.assertEqual((missing["audit_rows"], missing["exact_audit"]), (1,0))
+        db.execute("UPDATE legacy_import_runs SET expected_state_sha256=?", (plan["planHash"],))
+
+        db.execute("UPDATE published_works SET audio_sha256=? WHERE public_id='legacy-001'", ("f"*64,))
+        mismatch = result()
+        self.assertEqual((mismatch["reused_objects"], mismatch["new_objects"]), (13,7))
+        db.execute("UPDATE published_works SET audio_sha256=? WHERE public_id='legacy-001'", (rows[0]["sha256"],))
+        db.execute("UPDATE registrations SET audio_object_key='key-1' WHERE public_id='legacy-002'")
+        self.assertEqual((result()["unique_objects"], result()["duplicate_objects"]), (19,1))
+        db.execute("UPDATE registrations SET audio_object_key=NULL WHERE public_id='legacy-002'")
+        self.assertEqual((result()["unique_objects"], result()["duplicate_objects"]), (19,1))
+        db.close()
 
     def test_post_rollback_has_independent_semantic_fixture(self):
         expected = {"anonymous":14,"owned":0,"users":0,"registrations":0}
@@ -316,9 +402,10 @@ class AdapterTests(unittest.TestCase):
 
     def test_import_hash_failure_is_pre_mutation_and_rechecked_at_import(self):
         bad = dataclasses.replace(self.config, import_sql_sha256="0"*64)
-        runner = FakeRunner(); adapter = CloudflareProductionAdapter(bad, self.repo, runner, FakeEvidenceRunner())
-        result = run(ProductionPlan(tuple(x.key for x in bad.new), tuple(x.key for x in bad.legacy)), adapter)
-        self.assertEqual(result.mutation_count, 0); self.assertEqual(runner.calls, [])
+        runner = FakeRunner()
+        with self.assertRaisesRegex(ProductionSafetyError, "CONFIG_INVALID"):
+            CloudflareProductionAdapter(bad, self.repo, runner, FakeEvidenceRunner())
+        self.assertEqual(runner.calls, [])
         adapter = CloudflareProductionAdapter(self.config, self.repo, FakeRunner(), FakeEvidenceRunner())
         self.sql.write_text("changed after preflight")
         self.assertFalse(adapter.import_d1_once()); self.assertEqual(adapter.runner.calls, [])
