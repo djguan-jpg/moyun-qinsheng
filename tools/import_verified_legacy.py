@@ -13,6 +13,7 @@ TRANSACTION_TOKEN = re.compile(
     r"(?im)^\s*(?:BEGIN|COMMIT|END|ROLLBACK|SAVEPOINT|RELEASE)\b"
 )
 D1_DATABASE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,62}$")
+AUDIT_PREFIX = "legacy-import-v1"
 
 def sha256(path: Path) -> str:
     h = hashlib.sha256()
@@ -102,10 +103,46 @@ def validate_import_sql(sql: str) -> None:
         raise SystemExit("generated registration statement-count gate failed")
     if sql.count("UPDATE published_works SET published=0") != 1:
         raise SystemExit("generated lineage statement-count gate failed")
+    audit_lines = [line for line in sql.splitlines()
+                   if line.startswith("INSERT INTO legacy_import_runs(")]
+    if len(audit_lines) != 1:
+        raise SystemExit("generated audit statement-count gate failed")
+    hashes = re.search(
+        r"VALUES\('([0-9a-f]{64})','([0-9a-f]{64})','([0-9a-f]{64})',20,14,6,'applied',CURRENT_TIMESTAMP,NULL\)",
+        audit_lines[0],
+    )
+    if not hashes:
+        raise SystemExit("generated audit 20/14/6/applied contract gate failed")
+    import_id, source_hash, plan_hash = hashes.groups()
+    if import_id != audit_import_id(source_hash, plan_hash) or audit_lines[0] != render_audit_sql(source_hash, plan_hash):
+        raise SystemExit("generated audit exact reconciliation gate failed")
     public_ids = re.findall(r"VALUES\('([^']+)'", "\n".join(
         line for line in sql.splitlines() if line.startswith("INSERT INTO registrations(")))
     if len(public_ids) != EXPECTED_COUNT or len(set(public_ids)) != EXPECTED_COUNT:
         raise SystemExit("generated public-id uniqueness gate failed")
+
+def audit_import_id(source_hash: str, plan_hash: str) -> str:
+    if not HEX64.fullmatch(source_hash) or not HEX64.fullmatch(plan_hash):
+        raise SystemExit("audit hashes must be 64-character lowercase hex")
+    material = f"{AUDIT_PREFIX}\0{source_hash}\0{plan_hash}".encode()
+    return hashlib.sha256(material).hexdigest()
+
+def render_audit_sql(source_hash: str, plan_hash: str) -> str:
+    """Render an idempotent insert that fails closed on a non-exact source rerun."""
+    import_id = audit_import_id(source_hash, plan_hash)
+    columns = ("import_id,source_sha256,expected_state_sha256,registration_count,"
+               "reused_object_count,new_object_count,state,applied_at,rolled_back_at")
+    exact = ("legacy_import_runs.import_id=excluded.import_id AND "
+             "legacy_import_runs.expected_state_sha256=excluded.expected_state_sha256 AND "
+             "legacy_import_runs.registration_count=20 AND legacy_import_runs.reused_object_count=14 AND "
+             "legacy_import_runs.new_object_count=6 AND legacy_import_runs.state='applied' AND "
+             "legacy_import_runs.applied_at IS NOT NULL AND legacy_import_runs.rolled_back_at IS NULL")
+    # A mismatched existing source assigns NULL to a NOT NULL column, aborting the
+    # entire D1 ingestion batch. An exact rerun assigns the existing value to itself.
+    return (f"INSERT INTO legacy_import_runs({columns}) "
+            f"VALUES({q(import_id)},{q(source_hash)},{q(plan_hash)},20,14,6,'applied',CURRENT_TIMESTAMP,NULL) "
+            "ON CONFLICT(source_sha256) DO UPDATE SET expected_state_sha256="
+            f"CASE WHEN {exact} THEN legacy_import_runs.expected_state_sha256 ELSE NULL END;")
 
 def wrangler_import_argv(database: str, sql_file: Path) -> list[str]:
     """Return an argv vector; callers must not join it into a shell command."""
@@ -174,6 +211,7 @@ def render_sql(p: dict) -> str:
         lines.append("INSERT INTO registrations(public_id,discord_user_id,title,category,description,contact_email,audio_object_key,audio_original_name,audio_content_type,audio_size,audio_sha256,audio_state,is_test,published,created_at,updated_at,display_order,preserve_audio_object) VALUES("+",".join(map(q,values))+") ON CONFLICT(discord_user_id) DO NOTHING;")
     ids=",".join(q(x["publicId"]) for x in p["rows"] if x["displayOrder"] in {int(y["displayOrder"]) for y in p["rows"]})
     lines.append(f"UPDATE published_works SET published=0 WHERE published=1 AND public_id IN ({ids}) AND EXISTS (SELECT 1 FROM registrations r WHERE r.public_id=published_works.public_id AND r.audio_sha256=published_works.audio_sha256 AND r.audio_size=published_works.audio_size AND r.published=1);")
+    lines.append(render_audit_sql(p.get("dbHash", ""), p.get("planHash", "")))
     sql = "\n".join(lines)+"\n"
     validate_import_sql(sql)
     return sql

@@ -17,8 +17,10 @@ def test_sql_escapes_and_orders_deactivation_after_owned_rows():
     rows=[]
     for i in range(1,21):
         rows.append({"owner":f"owner-{i}","username":"u'", "display":"d", "title":"t'", "category":"c", "description":"", "contact":"x@example.test", "key":f"key-{i}", "name":f"audio-{i}", "contentType":"audio/mpeg", "size":i, "sha256":hashlib.sha256(str(i).encode()).hexdigest(), "created":"2026-01-01T00:00:00Z", "updated":"2026-01-01T00:00:00Z", "displayOrder":i, "publicId":f"legacy-{i:03d}", "isNew":i>14})
-    sql=MOD.render_sql({"rows":rows})
-    assert "u''" in sql and sql.index("INSERT INTO registrations") < sql.index("UPDATE published_works")
+    db_hash=hashlib.sha256(b"synthetic legacy database").hexdigest()
+    plan_hash=hashlib.sha256(b"synthetic deterministic plan").hexdigest()
+    sql=MOD.render_sql({"rows":rows,"dbHash":db_hash,"planHash":plan_hash})
+    assert "u''" in sql and sql.index("INSERT INTO registrations") < sql.index("UPDATE published_works") < sql.index("INSERT INTO legacy_import_runs")
     assert sql.startswith("PRAGMA foreign_keys=ON;\n")
     assert not MOD.TRANSACTION_TOKEN.search(sql)
     MOD.validate_import_sql(sql)
@@ -27,9 +29,13 @@ def test_generated_batch_validation_rejects_missing_duplicate_and_count_mismatch
     rows=[]
     for i in range(1,21):
         rows.append({"owner":f"owner-{i}","username":"u", "display":"d", "title":"t", "category":"c", "description":"", "contact":"", "key":f"key-{i}", "name":f"audio-{i}", "contentType":"audio/mpeg", "size":i, "sha256":hashlib.sha256(str(i).encode()).hexdigest(), "created":"2026-01-01T00:00:00Z", "updated":"2026-01-01T00:00:00Z", "displayOrder":i, "publicId":f"legacy-{i:03d}", "isNew":i>14})
-    sql=MOD.render_sql({"rows":rows})
+    sql=MOD.render_sql({"rows":rows,"dbHash":hashlib.sha256(b"synthetic db").hexdigest(),"planHash":hashlib.sha256(b"synthetic plan").hexdigest()})
     bad=["BEGIN;\n"+sql, sql.replace("INSERT INTO users(","INSERT INTO userz(",1),
-         sql.replace("'legacy-002'","'legacy-001'",1), sql.replace("UPDATE published_works SET published=0","UPDATE published_works SET published=1")]
+         sql.replace("'legacy-002'","'legacy-001'",1), sql.replace("UPDATE published_works SET published=0","UPDATE published_works SET published=1"),
+         sql.replace("INSERT INTO legacy_import_runs(","INSERT INTO damaged_audit(",1),
+         sql.replace(",20,14,6,'applied',",",20,13,7,'prepared',",1),
+         sql.replace("legacy_import_runs.expected_state_sha256=excluded.expected_state_sha256", "legacy_import_runs.expected_state_sha256<>excluded.expected_state_sha256",1),
+         sql+next(line for line in sql.splitlines() if line.startswith("INSERT INTO legacy_import_runs("))+"\n"]
     for value in bad:
         try: MOD.validate_import_sql(value)
         except SystemExit: pass
@@ -59,6 +65,9 @@ def test_transaction_gate_covers_all_control_tokens_and_argv_parameters(tmp_path
 def _rows():
     return [{"owner":f"owner-{i}","username":"u", "display":"d", "title":"t", "category":"c", "description":"", "contact":"", "key":f"key-{i}", "name":f"audio-{i}", "contentType":"audio/mpeg", "size":i, "sha256":hashlib.sha256(str(i).encode()).hexdigest(), "created":"2026-01-01T00:00:00Z", "updated":"2026-01-01T00:00:00Z", "displayOrder":i, "publicId":f"legacy-{i:03d}", "isNew":i>14} for i in range(1,21)]
 
+def _plan():
+    return {"rows":_rows(),"dbHash":hashlib.sha256(b"synthetic legacy sqlite").hexdigest(),"planHash":hashlib.sha256(b"synthetic 20-item plan").hexdigest()}
+
 def _apply_batch(db, sql, fail_at=None):
     statements=[x.strip() for x in sql.split(";") if x.strip()]
     with db:
@@ -70,16 +79,47 @@ def test_documented_batch_model_rolls_back_middle_failure_and_reruns_idempotentl
     db=sqlite3.connect(tmp_path/"atomic.db")
     for migration in sorted((ROOT/"migrations").glob("*.sql")):
         db.executescript(migration.read_text(encoding="utf-8"))
-    sql=MOD.render_sql({"rows":_rows()})
+    plan=_plan(); rows=plan["rows"]
+    for x in rows[:14]:
+        db.execute("INSERT INTO published_works(public_id,display_order,audio_object_key,audio_content_type,audio_size,audio_sha256,source_manifest_id,created_at) VALUES(?,?,?,?,?,?,?,?)",
+                   (x["publicId"],x["displayOrder"],x["key"],x["contentType"],x["size"],x["sha256"],"synthetic-manifest",x["created"]))
+    db.commit()
+    before={table:db.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall()
+            for table in ("users","registrations","published_works","legacy_import_runs")}
+    sql=MOD.render_sql(plan)
     try: _apply_batch(db,sql,fail_at=20)
     except sqlite3.OperationalError: pass
     else: raise AssertionError("injected middle-statement failure was accepted")
     assert db.execute("SELECT count(*) FROM users").fetchone()==(0,)
     assert db.execute("SELECT count(*) FROM registrations").fetchone()==(0,)
+    assert {table:db.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall()
+            for table in before}==before
+    _apply_batch(db,sql)
+    audit_after_first=db.execute("SELECT * FROM legacy_import_runs").fetchall()
     _apply_batch(db,sql); _apply_batch(db,sql)
     assert db.execute("SELECT count(*),count(DISTINCT discord_user_id) FROM users").fetchone()==(20,20)
     assert db.execute("SELECT count(*),count(DISTINCT discord_user_id),count(DISTINCT public_id) FROM registrations WHERE audio_state='active'").fetchone()==(20,20,20)
+    assert db.execute("SELECT count(*) FROM published_works WHERE published=0").fetchone()==(14,)
+    assert db.execute("SELECT count(*) FROM published_works WHERE published=1").fetchone()==(0,)
+    assert db.execute("SELECT count(*) FROM legacy_import_runs").fetchone()==(1,)
+    assert db.execute("SELECT import_id,source_sha256,expected_state_sha256,registration_count,reused_object_count,new_object_count,state,rolled_back_at FROM legacy_import_runs").fetchone()==(
+        MOD.audit_import_id(plan["dbHash"],plan["planHash"]),plan["dbHash"],plan["planHash"],20,14,6,"applied",None)
+    assert db.execute("SELECT * FROM legacy_import_runs").fetchall()==audit_after_first
     assert db.execute("PRAGMA foreign_key_check").fetchall()==[]
+
+def test_same_source_with_different_plan_aborts_without_changes(tmp_path):
+    db=sqlite3.connect(tmp_path/"conflict.db")
+    for migration in sorted((ROOT/"migrations").glob("*.sql")):
+        db.executescript(migration.read_text(encoding="utf-8"))
+    plan=_plan(); _apply_batch(db,MOD.render_sql(plan))
+    before={table:db.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall()
+            for table in ("users","registrations","published_works","legacy_import_runs")}
+    conflict={**plan,"planHash":hashlib.sha256(b"different synthetic plan").hexdigest()}
+    try: _apply_batch(db,MOD.render_sql(conflict))
+    except sqlite3.IntegrityError: pass
+    else: raise AssertionError("same-source different-plan conflict was accepted")
+    assert {table:db.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall()
+            for table in before}==before
 
 def test_private_ledger_is_create_only_and_count_only_summary(tmp_path):
     target=tmp_path/"ledger"
