@@ -184,6 +184,56 @@ class AdapterTests(unittest.TestCase):
                 adapter = CloudflareProductionAdapter(self.config, self.repo, runner, FakeEvidenceRunner())
                 self.assertEqual(adapter.post_import_reconcile(20), accepted)
 
+    def test_all_formal_queries_compare_rows_not_volatile_metadata(self):
+        checks = (
+            ("baseline:0004", "prove_d1_baseline_0004", None),
+            ("migration:0005", "verify_migration_0005", None),
+            ("post_import", "post_import_reconcile", 20),
+            ("post_rollback", "post_rollback_reconcile", 20),
+        )
+        volatile = (
+            {"duration":0.1,"served_by":"first","rows_read":1,"total_attempts":1},
+            {"duration":9.9,"served_by":"second","rows_read":999,"total_attempts":3,
+             "timings":{"sql_duration_ms":4.2}},
+        )
+        for label, method, argument in checks:
+            expected = self.config.expected_queries[label].expected
+            for meta in volatile:
+                with self.subTest(label=label, meta=meta):
+                    runner = FakeRunner(outputs={0:json.dumps([{"results":[expected],"success":True,"meta":meta}])})
+                    adapter = CloudflareProductionAdapter(self.config, self.repo, runner, FakeEvidenceRunner())
+                    if label == "migration:0005":
+                        adapter.ledger = mock.Mock(migration_accepted=mock.Mock(return_value=True))
+                    call = getattr(adapter, method)
+                    self.assertTrue(call() if argument is None else call(argument))
+
+            changed = dict(expected); key = next(iter(changed)); changed[key] = not changed[key] if type(changed[key]) is bool else changed[key] + 1
+            runner = FakeRunner(outputs={0:json.dumps([{"results":[changed],"success":True,"meta":volatile[0]}])})
+            adapter = CloudflareProductionAdapter(self.config, self.repo, runner, FakeEvidenceRunner())
+            if label == "migration:0005":
+                adapter.ledger = mock.Mock(migration_accepted=mock.Mock(return_value=True))
+            call = getattr(adapter, method)
+            self.assertFalse(call() if argument is None else call(argument))
+
+    def test_formal_query_envelopes_fail_closed(self):
+        row = self.config.expected_queries["baseline:0004"].expected
+        payloads = (
+            b"not-json",
+            b'{"not":"an-array"}',
+            json.dumps([{"results":[row],"success":False,"meta":{}}]).encode(),
+            json.dumps([{"results":[row],"success":True,"meta":{}},{"results":[row],"success":True,"meta":{}}]).encode(),
+            json.dumps([{"success":True,"meta":{}}]).encode(),
+            json.dumps([{"results":[row],"success":True,"meta":{},"error":"ambiguous"}]).encode(),
+            b'[{"results":[{"baseline":true}],"results":[{"baseline":true}],"success":true,"meta":{}}]',
+            b'[{"results":[{"baseline":true}],"success":true,"success":true,"meta":{}}]',
+            b'[{"results":[{"baseline":NaN}],"success":true,"meta":{}}]',
+            b" " * (1024 * 1024 + 1),
+        )
+        for payload in payloads:
+            with self.subTest(payload=payload[:80]):
+                adapter = CloudflareProductionAdapter(self.config, self.repo, FakeRunner(outputs={0:payload}), FakeEvidenceRunner())
+                self.assertFalse(adapter.prove_d1_baseline_0004())
+
     def test_canonical_post_import_query_recomputes_data_and_audit_proof(self):
         db = sqlite3.connect(self.base / "post-import.db")
         db.row_factory = sqlite3.Row
@@ -231,7 +281,7 @@ class AdapterTests(unittest.TestCase):
 
     def test_post_rollback_has_independent_semantic_fixture(self):
         expected = {"anonymous":14,"owned":0,"users":0,"registrations":0}
-        runner = FakeRunner(outputs={0: json.dumps(expected)})
+        runner = FakeRunner(outputs={0: json.dumps([{"results":[expected],"success":True,"meta":{}}])})
         adapter = CloudflareProductionAdapter(self.config, self.repo, runner, FakeEvidenceRunner())
         self.assertTrue(adapter.post_rollback_reconcile(20))
         self.assertIn("rollback-14-anon-0-owned-0-users-0-registrations", " ".join(runner.calls[0][0]))
@@ -348,7 +398,7 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(runner.calls[3][0], ["deploy","--name","worker","--strict"])
 
     def test_migration_apply_exact_once_and_schema_verification(self):
-        runner = FakeRunner(outputs={1: json.dumps({"migration": True})})
+        runner = FakeRunner(outputs={1: json.dumps([{"results":[{"migration":True}],"success":True,"meta":{}}])})
         adapter = CloudflareProductionAdapter(self.config, self.repo, runner)
         self.assertTrue(adapter.apply_migration_0005_once())
         self.assertTrue(adapter.apply_migration_0005_once())
@@ -373,7 +423,7 @@ class AdapterTests(unittest.TestCase):
     def test_migration_accepted_reentry_requires_exact_receipt_and_schema(self):
         first = CloudflareProductionAdapter(self.config, self.repo, FakeRunner())
         self.assertTrue(first.apply_migration_0005_once())
-        runner = FakeRunner(outputs={0: json.dumps({"migration": True})})
+        runner = FakeRunner(outputs={0: json.dumps([{"results":[{"migration":True}],"success":True,"meta":{}}])})
         resumed = CloudflareProductionAdapter(self.config, self.repo, runner)
         self.assertTrue(resumed.apply_migration_0005_once())
         self.assertEqual(runner.calls, [])
@@ -389,7 +439,7 @@ class AdapterTests(unittest.TestCase):
             CloudflareProductionAdapter(self.config, self.repo, FakeRunner()).apply_migration_0005_once()
 
     def test_migration_schema_mismatch_fails_closed(self):
-        runner = FakeRunner(outputs={1: json.dumps({"migration": False})})
+        runner = FakeRunner(outputs={1: json.dumps([{"results":[{"migration":False}],"success":True,"meta":{}}])})
         adapter = CloudflareProductionAdapter(self.config, self.repo, runner)
         self.assertTrue(adapter.apply_migration_0005_once())
         self.assertFalse(adapter.verify_migration_0005())

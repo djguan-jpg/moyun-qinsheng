@@ -28,6 +28,7 @@ PREFLIGHT_FIELDS = frozenset({"account_match", "zone_match", "worker_match", "d1
 SENSITIVE_WORDS = re.compile(r"(?i)(token|owner|discord|e-?mail|secret|api[_-]?key|sql|private|manifest|path)")
 GENERATED_GIT_DIRECTORIES = ("node_modules/", "dist/", ".wrangler/")
 GENERATED_GIT_FILES = frozenset({"worker-configuration.d.ts"})
+MAX_QUERY_JSON_BYTES = 1024 * 1024
 
 
 class ProductionSafetyError(RuntimeError):
@@ -156,6 +157,33 @@ def parse_wrangler_query_json(value: Any) -> dict[str, Any] | None:
         return None
     row = item["results"][0]
     return row if type(row) is dict else None
+
+
+def _decode_wrangler_query_json(raw: bytes) -> dict[str, Any] | None:
+    """Decode bounded JSON while rejecting duplicate keys and non-JSON constants."""
+    if type(raw) is not bytes or not raw or len(raw) > MAX_QUERY_JSON_BYTES:
+        return None
+
+    def closed_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        result: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError
+            result[key] = value
+        return result
+
+    def reject_constant(_value: str) -> None:
+        raise ValueError
+
+    try:
+        value = json.loads(
+            raw.decode("utf-8", errors="strict"),
+            object_pairs_hook=closed_object,
+            parse_constant=reject_constant,
+        )
+    except (UnicodeDecodeError, ValueError, TypeError):
+        return None
+    return parse_wrangler_query_json(value)
 
 
 @dataclass(frozen=True)
@@ -534,8 +562,7 @@ class CloudflareProductionAdapter:
         safe = label.replace(":", "-")
         if not self._run(["d1", "execute", self.config.d1_name, "--remote", "--command", spec.sql, "--json"], f"query-{safe}.raw"): return None
         try:
-            decoded = json.loads(self._evidence(f"query-{safe}.raw").read_text())
-            return parse_wrangler_query_json(decoded) if label == "post_import" else decoded
+            return _decode_wrangler_query_json(self._evidence(f"query-{safe}.raw").read_bytes())
         except Exception: return None
 
     def prove_d1_baseline_0004(self) -> bool:
