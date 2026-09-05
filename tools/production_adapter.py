@@ -560,9 +560,30 @@ class CloudflareProductionAdapter:
         if label not in QUERY_LABELS or label not in self.config.expected_queries: return None
         spec = self.config.expected_queries[label]
         safe = label.replace(":", "-")
-        if not self._run(["d1", "execute", self.config.d1_name, "--remote", "--command", spec.sql, "--json"], f"query-{safe}.raw"): return None
+        evidence_id = secrets.token_hex(16)
+        sql_path = self._evidence(f"query-{safe}-{evidence_id}.sql")
+        raw_path = self._evidence(f"query-{safe}-{evidence_id}.raw")
+        if sql_path.exists() or raw_path.exists():
+            raise ProductionSafetyError("STALE_EVIDENCE")
+        temporary: str | None = None
         try:
-            return _decode_wrangler_query_json(self._evidence(f"query-{safe}.raw").read_bytes())
+            sql_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            fd, temporary = tempfile.mkstemp(prefix=f".query-{safe}-", suffix=".sql", dir=sql_path.parent)
+            try:
+                os.chmod(temporary, 0o600)
+                with os.fdopen(fd, "wb") as stream:
+                    stream.write(spec.sql.encode("utf-8")); stream.flush(); os.fsync(stream.fileno())
+                os.link(temporary, sql_path)
+            finally:
+                if os.path.exists(temporary): os.unlink(temporary)
+        except Exception:
+            if temporary is not None and os.path.exists(temporary):
+                try: os.unlink(temporary)
+                except OSError: temporary = None
+            return None
+        if not self._run(["d1", "execute", self.config.d1_name, "--remote", "--file", str(sql_path), "--json"], raw_path.name): return None
+        try:
+            return _decode_wrangler_query_json(raw_path.read_bytes())
         except Exception: return None
 
     def prove_d1_baseline_0004(self) -> bool:

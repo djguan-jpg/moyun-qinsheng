@@ -53,6 +53,20 @@ class FakeEvidenceRunner:
         return CommandResult(True, "OK")
 
 
+class FileReadingWranglerRunner(FakeRunner):
+    def __init__(self, expected_sql, payload):
+        super().__init__(); self.expected_sql = expected_sql; self.payload = payload; self.file_bytes = None
+
+    def _wrangler(self, args, evidence_file=None, mutation=False):
+        self.calls.append((list(args), evidence_file, mutation))
+        file_path = Path(args[args.index("--file") + 1])
+        self.file_bytes = file_path.read_bytes()
+        if self.file_bytes != self.expected_sql.encode("utf-8"):
+            return CommandResult(False, "COMMAND_NONZERO")
+        evidence_file.write_bytes(json.dumps(self.payload).encode("utf-8"))
+        return CommandResult(True, "OK")
+
+
 def digest(path): return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
@@ -141,16 +155,69 @@ class AdapterTests(unittest.TestCase):
             with self.subTest(mutation=mutation), self.assertRaises(ProductionSafetyError):
                 ProductionExecutionConfig.load(self.write_config(mutation), self.repo)
 
-    def test_query_uses_fixture_sql_not_label_and_never_exposes_sql(self):
+    def test_query_uses_private_utf8_file_and_never_exposes_sql_or_hashes_in_argv(self):
         wrapper = [{"results":[self.post_import.expected],"success":True,"meta":{}}]
         runner = FakeRunner(outputs={0: json.dumps(wrapper)})
         adapter = CloudflareProductionAdapter(self.config, self.repo, runner, FakeEvidenceRunner())
         self.assertTrue(adapter.post_import_reconcile(20))
         argv = runner.calls[0][0]
-        self.assertIn(self.post_import.sql, argv)
-        self.assertNotIn("post_import", argv)
+        sql_path = Path(argv[argv.index("--file") + 1])
+        self.assertEqual(sql_path.read_bytes(), self.post_import.sql.encode("utf-8"))
+        self.assertEqual(argv, ["d1", "execute", "database", "--remote", "--file", str(sql_path), "--json"])
+        self.assertNotIn("--command", argv)
+        for private_value in (self.post_import.sql, "a" * 64, "b" * 64):
+            self.assertNotIn(private_value, repr(argv))
         self.assertNotIn(self.post_import.sql, repr(adapter.config))
         self.assertIsNone(adapter._query("unknown"))
+
+    def test_windows_realistic_long_query_runner_reads_exact_file_bytes(self):
+        payload = [{"results":[self.post_import.expected],"success":True,"meta":{}}]
+        runner = FileReadingWranglerRunner(self.post_import.sql, payload)
+        adapter = CloudflareProductionAdapter(self.config, self.repo, runner, FakeEvidenceRunner())
+        self.assertTrue(adapter.post_import_reconcile(20))
+        self.assertGreater(len(runner.file_bytes), 2000)
+        self.assertIn(b"WITH active_owned_rows AS", runner.file_bytes)
+        self.assertIn("--file", runner.calls[0][0])
+        self.assertNotIn("--command", runner.calls[0][0])
+
+    def test_query_labels_have_isolated_files(self):
+        runner = FakeRunner(outputs={i: json.dumps([{"results":[self.config.expected_queries[label].expected],
+                                                     "success":True,"meta":{}}])
+                                     for i, label in enumerate(sorted(self.config.expected_queries))})
+        adapter = CloudflareProductionAdapter(self.config, self.repo, runner, FakeEvidenceRunner())
+        for label in sorted(self.config.expected_queries):
+            self.assertEqual(adapter._query(label), self.config.expected_queries[label].expected)
+        paths = [Path(call[0][call[0].index("--file") + 1]) for call in runner.calls]
+        self.assertEqual(len(paths), len(set(paths)))
+        for label, path in zip(sorted(self.config.expected_queries), paths):
+            self.assertEqual(path.read_bytes(), self.config.expected_queries[label].sql.encode("utf-8"))
+
+    def test_stale_query_sql_or_raw_evidence_blocks_provider(self):
+        for suffix in ("sql", "raw"):
+            with self.subTest(suffix=suffix):
+                self.out.mkdir(exist_ok=True)
+                stale = self.out / f"query-baseline-0004-{'c' * 32}.{suffix}"
+                stale.write_bytes(b"stale")
+                runner = FakeRunner()
+                adapter = CloudflareProductionAdapter(self.config, self.repo, runner, FakeEvidenceRunner())
+                with mock.patch("secrets.token_hex", return_value="c" * 32):
+                    with self.assertRaisesRegex(ProductionSafetyError, "STALE_EVIDENCE"):
+                        adapter.prove_d1_baseline_0004()
+                self.assertEqual(runner.calls, [])
+                stale.unlink()
+
+    def test_query_write_failure_blocks_provider(self):
+        runner = FakeRunner()
+        adapter = CloudflareProductionAdapter(self.config, self.repo, runner, FakeEvidenceRunner())
+        with mock.patch("tempfile.mkstemp", side_effect=OSError):
+            self.assertIsNone(adapter._query("baseline:0004"))
+        self.assertEqual(runner.calls, [])
+
+    def test_provider_incomplete_input_nonzero_rejects(self):
+        runner = FakeRunner(outputs={0: b"incomplete input: SQLITE_ERROR [code: 7500]"}, fail_at=0)
+        adapter = CloudflareProductionAdapter(self.config, self.repo, runner, FakeEvidenceRunner())
+        self.assertFalse(adapter.post_import_reconcile(20))
+        self.assertEqual(len(runner.calls), 1)
 
     def test_post_import_override_and_noncanonical_import_fail_before_mutation(self):
         for mutation in (
@@ -284,7 +351,9 @@ class AdapterTests(unittest.TestCase):
         runner = FakeRunner(outputs={0: json.dumps([{"results":[expected],"success":True,"meta":{}}])})
         adapter = CloudflareProductionAdapter(self.config, self.repo, runner, FakeEvidenceRunner())
         self.assertTrue(adapter.post_rollback_reconcile(20))
-        self.assertIn("rollback-14-anon-0-owned-0-users-0-registrations", " ".join(runner.calls[0][0]))
+        sql_path = Path(runner.calls[0][0][runner.calls[0][0].index("--file") + 1])
+        self.assertEqual(sql_path.read_text(encoding="utf-8"),
+                         "SELECT 'rollback-14-anon-0-owned-0-users-0-registrations'")
 
     def test_config_counts_commit_and_provenance_fail_closed(self):
         mutations = [lambda x:x.update(source_commit="0"*40), lambda x:x.update(source_commit="A"*40),
@@ -407,8 +476,10 @@ class AdapterTests(unittest.TestCase):
         self.assertTrue(adapter.apply_migration_0005_once())
         self.assertTrue(adapter.verify_migration_0005())
         self.assertEqual(runner.calls[0][0], ["d1", "migrations", "apply", "database", "--remote"])
-        self.assertEqual(runner.calls[1][0], ["d1", "execute", "database", "--remote", "--command",
-                                              "SELECT 'migration-fixture'", "--json"])
+        query_argv = runner.calls[1][0]
+        self.assertEqual(query_argv[:5], ["d1", "execute", "database", "--remote", "--file"])
+        self.assertEqual(query_argv[-1], "--json")
+        self.assertEqual(Path(query_argv[5]).read_text(encoding="utf-8"), "SELECT 'migration-fixture'")
 
     def test_migration_nonzero_is_ambiguous_blocks_retry_and_has_private_receipt(self):
         runner = FakeRunner(fail_at=0)
