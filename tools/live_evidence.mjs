@@ -98,13 +98,23 @@ function magicOk(m,b){if(m==='audio/mpeg')return (b[0]===0x49&&b[1]===0x44&&b[2]
 export async function r2ObjectMetadata(a,token,fetchImpl=fetch,apiBase=API){
   objectPath(a['object-key']);const path=`accounts/${enc(a['account-id'])}/r2/buckets/${enc(a.bucket)}/objects`;const url=apiUrl(path,apiBase);url.searchParams.set('prefix',a['object-key']);url.searchParams.set('per_page','10');
   const r=await timedFetch(fetchImpl,url,{method:'GET',headers:{Authorization:`Bearer ${token}`}});if(r.status<200||r.status>=300)fail();const v=await responseJson(r);
-  if(setMismatch(v,['success','result','errors','messages','result_info'])||v.success!==true||!Array.isArray(v.result)||!Array.isArray(v.errors)||v.errors.length||!Array.isArray(v.messages)||v.messages.length)fail();
-  const info=v.result_info;if(!info||typeof info!=='object'||Array.isArray(info)||setMismatch(info,['page','per_page','count','total_count','total_pages']))fail();
-  if(info.page!==1||info.per_page!==10||info.count!==v.result.length||info.total_count!==v.result.length||info.total_pages!==1||v.result.length>10)fail();
-  const exact=v.result.filter(x=>x&&typeof x==='object'&&!Array.isArray(x)&&x.key===a['object-key']);if(exact.length!==1)fail();const item=exact[0];
-  const allowed=new Set(['key','size','uploaded','etag','http_metadata','custom_metadata']);if(Object.keys(item).some(k=>!allowed.has(k))||!Object.hasOwn(item,'size')||!Object.hasOwn(item,'http_metadata'))fail();
+  const rootAllowed=new Set(['success','result','errors','messages','result_info']);if(!v||Object.keys(v).some(k=>!rootAllowed.has(k))||v.success!==true||!Array.isArray(v.result))fail();
+  for(const name of ['errors','messages'])if(Object.hasOwn(v,name)&&(!Array.isArray(v[name])||v[name].length))fail();
+  if(v.result.length>10)fail();const hasInfo=Object.hasOwn(v,'result_info');
+  if(hasInfo){const info=v.result_info,allowed=new Set(['cursor','delimited','is_truncated','per_page']);if(!info||typeof info!=='object'||Array.isArray(info)||Object.keys(info).some(k=>!allowed.has(k)))fail();
+    if(Object.hasOwn(info,'cursor')&&(typeof info.cursor!=='string'||info.cursor.length))fail();
+    if(Object.hasOwn(info,'is_truncated')&&(typeof info.is_truncated!=='boolean'||info.is_truncated))fail();
+    if(Object.hasOwn(info,'per_page')&&(!Number.isSafeInteger(info.per_page)||info.per_page!==10))fail();
+    if(Object.hasOwn(info,'delimited')&&(!Array.isArray(info.delimited)||info.delimited.some(x=>typeof x!=='string')||info.delimited.length))fail();
+  }
+  if(v.result.length===10&&(!hasInfo||v.result_info.is_truncated!==false))fail();
+  if(v.result.length!==1)fail();const item=v.result[0];if(!item||typeof item!=='object'||Array.isArray(item)||item.key!==a['object-key'])fail();
+  const allowed=new Set(['custom_metadata','etag','http_metadata','key','last_modified','size','ssec','storage_class']);if(Object.keys(item).some(k=>!allowed.has(k))||!Object.hasOwn(item,'size')||!Object.hasOwn(item,'http_metadata'))fail();
   if(!Number.isSafeInteger(item.size)||item.size<1||item.size>MAX_OBJECT||!item.http_metadata||typeof item.http_metadata!=='object'||Array.isArray(item.http_metadata))fail();
+  if(Object.hasOwn(item,'etag')&&(typeof item.etag!=='string'||!item.etag.length)||Object.hasOwn(item,'last_modified')&&(typeof item.last_modified!=='string'||!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z$/.test(item.last_modified))||Object.hasOwn(item,'storage_class')&&(typeof item.storage_class!=='string'||!item.storage_class.length)||Object.hasOwn(item,'ssec')&&(typeof item.ssec!=='string'||!item.ssec.length))fail();
+  if(Object.hasOwn(item,'custom_metadata')&&(!item.custom_metadata||typeof item.custom_metadata!=='object'||Array.isArray(item.custom_metadata)||Object.values(item.custom_metadata).some(x=>typeof x!=='string')))fail();
   const httpAllowed=new Set(['contentType','contentLanguage','contentDisposition','contentEncoding','cacheControl','cacheExpiry']);if(Object.keys(item.http_metadata).some(k=>!httpAllowed.has(k))||!Object.hasOwn(item.http_metadata,'contentType'))fail();
+  if(Object.values(item.http_metadata).some(x=>typeof x!=='string'))fail();
   const mime=normalizedMime(item.http_metadata.contentType);if(!['audio/mpeg','audio/wav','audio/x-wav','audio/ogg','audio/mp4','audio/x-m4a'].includes(mime))fail();return{content_type:mime,size:item.size};
 }
 

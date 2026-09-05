@@ -162,8 +162,8 @@ test('symlink parent traversal is rejected when platform permits it', async (t) 
 });
 
 const mp3=Buffer.from([0x49,0x44,0x33,1,2,3,4,5]);
-const listEnvelope=(result,resultInfo={page:1,per_page:10,count:result.length,total_count:result.length,total_pages:1})=>({success:true,result,errors:[],messages:[],result_info:resultInfo});
-const listItem=(key,size=23_646_892,contentType='Audio/MPEG; charset=binary')=>({key,size,uploaded:'2026-01-01T00:00:00Z',etag:'not-a-sha256',http_metadata:{contentType},custom_metadata:{}});
+const listEnvelope=(result,resultInfo)=>({success:true,errors:[],messages:[],result,...(resultInfo===undefined?{}:{result_info:resultInfo})});
+const listItem=(key,size=23_646_892,contentType='Audio/MPEG; charset=binary')=>({key,etag:'not-a-sha256',last_modified:'2026-01-01T00:00:00Z',size,http_metadata:{cacheControl:'private',contentType},custom_metadata:{},storage_class:'Standard'});
 const jsonResponse=(value,options={})=>{const body=typeof value==='string'?value:JSON.stringify(value);return new Response(body,{status:options.status??200,headers:{'content-type':'application/json','content-length':options.length??String(Buffer.byteLength(body)),...(options.headers||{})}});};
 
 test('R2 list uses exact bounded prefix GET, authorization only, and minimum normalized metadata',async()=>{
@@ -181,11 +181,19 @@ test('R2 23.6 MB ObjectSpec requires only a small list metadata response and nev
   assert.equal(calls,1);assert.equal(got.size,23_646_892);assert.ok(Buffer.byteLength(body)<1024);
 });
 
-test('R2 list rejects absent, longer-prefix-only, duplicate, invalid metadata and ambiguous pagination',async()=>{
+test('R2 list rejects absent, longer-prefix-only, duplicate, unknown and wrongly typed metadata',async()=>{
   const args={'account-id':'a',bucket:'bbb','object-key':'a/b.mp3'},call=value=>r2ObjectMetadata(args,'private',async()=>jsonResponse(value),'http://127.0.0.1:1/client/v4');
   const good=listItem(args['object-key'],8,'audio/mpeg');
-  const cases=[listEnvelope([]),listEnvelope([listItem('a/b.mp3.more',8)]),listEnvelope([good,{...good}]),listEnvelope([{...good,key:'wrong'}]),listEnvelope([{...good,size:8.5}]),listEnvelope([{...good,size:-1}]),listEnvelope([{...good,size:25*1024*1024+1}]),listEnvelope([{...good,http_metadata:{contentType:'text/plain'}}]),listEnvelope([{...good,http_metadata:{}}]),listEnvelope([{...good,unexpected:true}]),listEnvelope([good],{page:1,per_page:10,count:1,total_count:2,total_pages:1}),listEnvelope([good],{page:1,per_page:10,count:1,total_count:1,total_pages:2}),listEnvelope([good],{page:1,per_page:10,count:1,total_count:1,total_pages:1,cursor:'next'}),{...listEnvelope([good]),result:{}},{...listEnvelope([good]),extra:true}];
+  const cases=[listEnvelope([]),listEnvelope([listItem('a/b.mp3.more',8)]),listEnvelope([good,{...good}]),listEnvelope([good,listItem('a/b.mp3.more',8)]),listEnvelope([{...good,key:'wrong'}]),listEnvelope([{...good,size:8.5}]),listEnvelope([{...good,size:-1}]),listEnvelope([{...good,size:25*1024*1024+1}]),listEnvelope([{...good,http_metadata:{contentType:'text/plain'}}]),listEnvelope([{...good,http_metadata:{}}]),listEnvelope([{...good,http_metadata:{contentType:'audio/mpeg',cacheControl:1}}]),listEnvelope([{...good,unexpected:true}]),listEnvelope([{...good,etag:1}]),listEnvelope([{...good,last_modified:1}]),listEnvelope([{...good,storage_class:1}]),listEnvelope([{...good,ssec:{}}]),listEnvelope([{...good,custom_metadata:{x:1}}]),{...listEnvelope([good]),result:{}},{...listEnvelope([good]),extra:true},{result:[good],success:true,errors:{}},{result:[good],success:true,messages:['warning']}];
   for(const value of cases)await assert.rejects(()=>call(value),/LIVE_EVIDENCE_ERROR/);
+});
+
+test('R2 cursor pagination is closed and legacy zone pagination is rejected',async()=>{
+  const args={'account-id':'a',bucket:'bbb','object-key':'a/b.mp3'},good=listItem('a/b.mp3',8,'audio/mpeg'),call=value=>r2ObjectMetadata(args,'private',async()=>jsonResponse(value),'http://127.0.0.1:1/client/v4');
+  for(const info of [{page:1,per_page:10,count:1,total_count:1,total_pages:1},{is_truncated:true},{cursor:'next'},{delimited:['prefix/']},{delimited:[1]},{per_page:'10'},{per_page:9},{unexpected:false}])await assert.rejects(()=>call(listEnvelope([good],info)),/LIVE_EVIDENCE_ERROR/);
+  await assert.rejects(()=>call(listEnvelope(Array.from({length:10},()=>good))),/LIVE_EVIDENCE_ERROR/);
+  await assert.rejects(()=>call(listEnvelope(Array.from({length:10},()=>good),{cursor:'',per_page:10})),/LIVE_EVIDENCE_ERROR/);
+  assert.deepEqual(await call(listEnvelope([good],{cursor:'',delimited:[],is_truncated:false,per_page:10})),{content_type:'audio/mpeg',size:8});
 });
 
 test('R2 key and list response failures are closed, including redirect, status, oversize and malformed body',async()=>{
