@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { collectBrowserEvidence, collectCdpEvidence, collectLiveGate, cloudflarePreflight, FUNCTIONAL_AUDIO_PACE_MS, LIVE_BOOLEAN_GATES, LIVE_COUNT_GATES, LIVE_DIAGNOSTIC_GATES, parseArgs, parseLiveDiagnostic, publicAccess, r2ObjectMetadata, writeLiveDiagnostic } from '../tools/live_evidence.mjs';
+import { collectBrowserEvidence, collectCdpEvidence, collectLiveGate, cloudflarePreflight, d1Query, FUNCTIONAL_AUDIO_PACE_MS, LIVE_BOOLEAN_GATES, LIVE_COUNT_GATES, LIVE_DIAGNOSTIC_GATES, parseArgs, parseLiveDiagnostic, publicAccess, r2ObjectMetadata, writeLiveDiagnostic } from '../tools/live_evidence.mjs';
 import { createHash } from 'node:crypto';
 
 const nonce = 'a'.repeat(64);
@@ -18,6 +18,30 @@ test('closed argv rejects unknown, missing, duplicate, relative, nonce and live 
     ['--mode','live-gate','--output',resolve(tmpdir(),'x'),'--nonce',nonce,'--domain','evil.invalid','--r2-custom-domains-proof']]) {
     assert.throws(() => parseArgs(argv));
   }
+});
+
+test('D1 query posts exact private SQL contract and returns only official result array',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'d1-query-')),sqlFile=join(root,'query.sql');const sql=`WITH x AS (SELECT 1 AS n) SELECT n, (SELECT COUNT(*) FROM pragma_foreign_key_check) AS fk FROM x;`;await writeFile(sqlFile,sql,{encoding:'utf8',mode:0o600});let seen;
+  const result=[{results:[{n:1,fk:0}],success:true,meta:{duration:1}}];
+  const got=await d1Query({'account-id':'acct id','d1-id':'db/id','sql-file':sqlFile},'fixture',async(url,init)=>{seen={url:String(url),init};const body=JSON.stringify({success:true,result,errors:[],messages:[]});return new Response(body,{status:200,headers:{'content-type':'application/json','content-length':String(Buffer.byteLength(body))}});},'https://example.invalid/client/v4');
+  assert.deepEqual(got,result);assert.equal(seen.url,'https://example.invalid/client/v4/accounts/acct%20id/d1/database/db%2Fid/query');assert.equal(seen.init.method,'POST');assert.equal(seen.init.redirect,'manual');assert.equal(seen.init.headers.Authorization,'Bearer fixture');assert.equal(seen.init.headers['Content-Type'],'application/json');assert.deepEqual(JSON.parse(seen.init.body),{sql,params:[]});
+  const publicView=JSON.stringify([seen.url,seen.init.method,seen.init.headers['Content-Type'],got]);assert.doesNotMatch(publicView,/Bearer fixture/);
+});
+
+test('D1 query rejects unsafe SQL files and unsafe statements',async(t)=>{
+  const root=await mkdtemp(join(tmpdir(),'d1-query-bad-'));const call=async file=>d1Query({'account-id':'a','d1-id':'d','sql-file':file},'x',()=>assert.fail(),'https://example.invalid/client/v4');
+  for(const [name,data] of [['empty',''],['nul','SELECT 1\0;'],['control','SELECT 1\u0001;'],['utf8',Buffer.from([0xff])],['large',Buffer.alloc(1024*1024+1,65)]]){const p=join(root,name);await writeFile(p,data);await assert.rejects(()=>call(p),/LIVE_EVIDENCE_ERROR/);}
+  await assert.rejects(()=>call(join(root,'missing')),/LIVE_EVIDENCE_ERROR/);const repoSql=resolve('d1-query-repo-test.sql');await writeFile(repoSql,'SELECT 1;');try{await assert.rejects(()=>call(repoSql),/LIVE_EVIDENCE_ERROR/);}finally{await import('node:fs/promises').then(x=>x.unlink(repoSql));}
+  for(const [i,sql] of ['SELECT 1; SELECT 2;','WITH x AS (SELECT 1) DELETE FROM x;','INSERT INTO x VALUES(1);','PRAGMA foreign_keys;','BEGIN;','SELECT 1; DROP TABLE x;'].entries()){const p=join(root,`bad-${i}.sql`);await writeFile(p,sql);await assert.rejects(()=>call(p),/LIVE_EVIDENCE_ERROR/);}
+  const real=join(root,'real.sql'),link=join(root,'link.sql');await writeFile(real,'SELECT 1;');try{await symlink(real,link,'file');await assert.rejects(()=>call(link),/LIVE_EVIDENCE_ERROR/);}catch(e){if(e?.code==='EPERM')t.diagnostic('symlink unavailable');else if(!String(e).includes('LIVE_EVIDENCE_ERROR'))throw e;}
+});
+
+test('D1 query rejects redirects, HTTP errors, and malformed or oversized outer responses',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'d1-query-response-')),file=join(root,'q.sql');await writeFile(file,'SELECT 1;',{mode:0o600});const args={'account-id':'a','d1-id':'d','sql-file':file};
+  const bodies=['not-json','{"success":true,"result":[],"result":[]}',JSON.stringify({success:false,result:[]}),JSON.stringify({success:true,result:{}}),JSON.stringify({success:true,result:[],extra:true}),JSON.stringify({success:true,result:[],errors:[{}]})];
+  for(const body of bodies)await assert.rejects(()=>d1Query(args,'x',async()=>new Response(body,{status:200,headers:{'content-length':String(Buffer.byteLength(body))}}),'https://example.invalid/client/v4'),/LIVE_EVIDENCE_ERROR/);
+  for(const status of [302,400,500])await assert.rejects(()=>d1Query(args,'x',async()=>new Response('{}',{status}),'https://example.invalid/client/v4'),/LIVE_EVIDENCE_ERROR/);
+  await assert.rejects(()=>d1Query(args,'x',async()=>new Response('{}',{status:200,headers:{'content-length':String(1024*1024+1)}}),'https://example.invalid/client/v4'),/LIVE_EVIDENCE_ERROR/);
 });
 
 function fixtureFetch(shapes) {

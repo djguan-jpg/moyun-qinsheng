@@ -18,7 +18,7 @@ from tools.production_adapter import (
     ReceiptLedger, _verify_source_checkout, guard_existing_private, guard_new_private,
     parse_custom_domains_disabled, parse_dev_url_disabled, parse_live_evidence,
     parse_object_metadata, parse_public_access, parse_resource_preflight, verify_object_file,
-    verify_sqlite_export,
+    verify_sqlite_export, parse_wrangler_query_json,
 )
 from tools.import_verified_legacy import parse_canonical_audit_proof, render_audit_sql, render_sql
 from tools.production_complete import CONFIRMATIONS, execute
@@ -53,17 +53,17 @@ class FakeEvidenceRunner:
         return CommandResult(True, "OK")
 
 
-class FileReadingWranglerRunner(FakeRunner):
+class FileReadingEvidenceRunner(FakeEvidenceRunner):
     def __init__(self, expected_sql, payload):
         super().__init__(); self.expected_sql = expected_sql; self.payload = payload; self.file_bytes = None
 
-    def _wrangler(self, args, evidence_file=None, mutation=False):
-        self.calls.append((list(args), evidence_file, mutation))
-        file_path = Path(args[args.index("--file") + 1])
+    def collect(self, mode, output, nonce, args):
+        self.calls.append((mode, output, nonce, list(args)))
+        file_path = Path(args[args.index("--sql-file") + 1])
         self.file_bytes = file_path.read_bytes()
         if self.file_bytes != self.expected_sql.encode("utf-8"):
             return CommandResult(False, "COMMAND_NONZERO")
-        evidence_file.write_bytes(json.dumps(self.payload).encode("utf-8"))
+        output.write_text(json.dumps({"nonce":nonce,"result":self.payload}), encoding="utf-8")
         return CommandResult(True, "OK")
 
 
@@ -157,43 +157,49 @@ class AdapterTests(unittest.TestCase):
 
     def test_query_uses_private_utf8_file_and_never_exposes_sql_or_hashes_in_argv(self):
         wrapper = [{"results":[self.post_import.expected],"success":True,"meta":{}}]
-        runner = FakeRunner(outputs={0: json.dumps(wrapper)})
-        adapter = CloudflareProductionAdapter(self.config, self.repo, runner, FakeEvidenceRunner())
+        runner = FakeRunner(); evidence = FileReadingEvidenceRunner(self.post_import.sql, wrapper)
+        adapter = CloudflareProductionAdapter(self.config, self.repo, runner, evidence)
         self.assertTrue(adapter.post_import_reconcile(20))
-        argv = runner.calls[0][0]
-        sql_path = Path(argv[argv.index("--file") + 1])
+        argv = evidence.calls[0][3]
+        sql_path = Path(argv[argv.index("--sql-file") + 1])
         self.assertEqual(sql_path.read_bytes(), self.post_import.sql.encode("utf-8"))
-        self.assertEqual(argv, ["d1", "execute", "database", "--remote", "--file", str(sql_path), "--json"])
+        self.assertEqual(argv, ["--account-id", "account", "--d1-id", "db-id", "--sql-file", str(sql_path)])
         self.assertNotIn("--command", argv)
+        self.assertNotIn("--file", argv)
+        self.assertEqual(runner.calls, [])
         for private_value in (self.post_import.sql, "a" * 64, "b" * 64):
             self.assertNotIn(private_value, repr(argv))
         self.assertNotIn(self.post_import.sql, repr(adapter.config))
         self.assertIsNone(adapter._query("unknown"))
 
-    def test_windows_realistic_long_query_runner_reads_exact_file_bytes(self):
+    def test_windows_realistic_long_query_evidence_reads_exact_file_bytes(self):
         payload = [{"results":[self.post_import.expected],"success":True,"meta":{}}]
-        runner = FileReadingWranglerRunner(self.post_import.sql, payload)
-        adapter = CloudflareProductionAdapter(self.config, self.repo, runner, FakeEvidenceRunner())
+        evidence = FileReadingEvidenceRunner(self.post_import.sql, payload)
+        adapter = CloudflareProductionAdapter(self.config, self.repo, FakeRunner(), evidence)
         self.assertTrue(adapter.post_import_reconcile(20))
-        self.assertGreater(len(runner.file_bytes), 2000)
-        self.assertIn(b"WITH active_owned_rows AS", runner.file_bytes)
-        self.assertIn("--file", runner.calls[0][0])
-        self.assertNotIn("--command", runner.calls[0][0])
+        self.assertGreater(len(evidence.file_bytes), 2000)
+        self.assertIn(b"WITH active_owned_rows AS", evidence.file_bytes)
+        self.assertIn("--sql-file", evidence.calls[0][3])
+        self.assertNotIn("--command", evidence.calls[0][3])
 
     def test_query_labels_have_isolated_files(self):
-        runner = FakeRunner(outputs={i: json.dumps([{"results":[self.config.expected_queries[label].expected],
-                                                     "success":True,"meta":{}}])
-                                     for i, label in enumerate(sorted(self.config.expected_queries))})
-        adapter = CloudflareProductionAdapter(self.config, self.repo, runner, FakeEvidenceRunner())
+        class LabelsEvidence(FakeEvidenceRunner):
+            def collect(inner, mode, output, nonce, args):
+                inner.calls.append((mode, output, nonce, list(args)))
+                sql = Path(args[args.index("--sql-file") + 1]).read_text(encoding="utf-8")
+                expected = next(spec.expected for spec in self.config.expected_queries.values() if spec.sql == sql)
+                output.write_text(json.dumps({"nonce":nonce,"result":[{"results":[expected],"success":True,"meta":{}}]}))
+                return CommandResult(True, "OK")
+        evidence = LabelsEvidence(); adapter = CloudflareProductionAdapter(self.config, self.repo, FakeRunner(), evidence)
         for label in sorted(self.config.expected_queries):
             self.assertEqual(adapter._query(label), self.config.expected_queries[label].expected)
-        paths = [Path(call[0][call[0].index("--file") + 1]) for call in runner.calls]
+        paths = [Path(call[3][call[3].index("--sql-file") + 1]) for call in evidence.calls]
         self.assertEqual(len(paths), len(set(paths)))
         for label, path in zip(sorted(self.config.expected_queries), paths):
             self.assertEqual(path.read_bytes(), self.config.expected_queries[label].sql.encode("utf-8"))
 
-    def test_stale_query_sql_or_raw_evidence_blocks_provider(self):
-        for suffix in ("sql", "raw"):
+    def test_stale_query_sql_or_json_evidence_blocks_provider(self):
+        for suffix in ("sql", "json"):
             with self.subTest(suffix=suffix):
                 self.out.mkdir(exist_ok=True)
                 stale = self.out / f"query-baseline-0004-{'c' * 32}.{suffix}"
@@ -214,10 +220,28 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(runner.calls, [])
 
     def test_provider_incomplete_input_nonzero_rejects(self):
-        runner = FakeRunner(outputs={0: b"incomplete input: SQLITE_ERROR [code: 7500]"}, fail_at=0)
-        adapter = CloudflareProductionAdapter(self.config, self.repo, runner, FakeEvidenceRunner())
+        runner = FakeRunner(); evidence = FakeEvidenceRunner(fail=True)
+        adapter = CloudflareProductionAdapter(self.config, self.repo, runner, evidence)
         self.assertFalse(adapter.post_import_reconcile(20))
-        self.assertEqual(len(runner.calls), 1)
+        self.assertEqual(len(evidence.calls), 1); self.assertEqual(runner.calls, [])
+
+    def test_wrangler_file_summary_regression_rejects_but_official_result_accepts(self):
+        row = self.config.expected_queries["baseline:0004"].expected
+        summary = {"results": [], "success": True, "finalBookmark": "private", "meta": {}}
+        official = [{"results": [row], "success": True, "meta": {}}]
+        self.assertIsNone(parse_wrangler_query_json(summary))
+        self.assertEqual(parse_wrangler_query_json(official), row)
+
+    def test_query_sql_tampering_after_collection_fails_closed_without_mutation(self):
+        row = self.config.expected_queries["baseline:0004"].expected
+        class TamperingEvidence(FakeEvidenceRunner):
+            def collect(inner, mode, output, nonce, args):
+                result = super().collect(mode, output, nonce, args)
+                Path(args[args.index("--sql-file") + 1]).write_text("SELECT 0", encoding="utf-8")
+                return result
+        runner=FakeRunner(); evidence=TamperingEvidence({"d1-query":[{"results":[row],"success":True,"meta":{}}]})
+        adapter=CloudflareProductionAdapter(self.config,self.repo,runner,evidence)
+        self.assertFalse(adapter.prove_d1_baseline_0004());self.assertEqual(runner.calls,[])
 
     def test_post_import_override_and_noncanonical_import_fail_before_mutation(self):
         for mutation in (
@@ -247,8 +271,8 @@ class AdapterTests(unittest.TestCase):
         cases.append(([{"results":[list(good.values())],"success":True,"meta":{}}], False))
         for payload, accepted in cases:
             with self.subTest(payload=payload):
-                runner = FakeRunner(outputs={0: json.dumps(payload)})
-                adapter = CloudflareProductionAdapter(self.config, self.repo, runner, FakeEvidenceRunner())
+                runner = FakeRunner(); evidence = FileReadingEvidenceRunner(self.post_import.sql, payload)
+                adapter = CloudflareProductionAdapter(self.config, self.repo, runner, evidence)
                 self.assertEqual(adapter.post_import_reconcile(20), accepted)
 
     def test_all_formal_queries_compare_rows_not_volatile_metadata(self):
@@ -267,16 +291,16 @@ class AdapterTests(unittest.TestCase):
             expected = self.config.expected_queries[label].expected
             for meta in volatile:
                 with self.subTest(label=label, meta=meta):
-                    runner = FakeRunner(outputs={0:json.dumps([{"results":[expected],"success":True,"meta":meta}])})
-                    adapter = CloudflareProductionAdapter(self.config, self.repo, runner, FakeEvidenceRunner())
+                    runner = FakeRunner(); evidence = FakeEvidenceRunner({"d1-query":[{"results":[expected],"success":True,"meta":meta}]})
+                    adapter = CloudflareProductionAdapter(self.config, self.repo, runner, evidence)
                     if label == "migration:0005":
                         adapter.ledger = mock.Mock(migration_accepted=mock.Mock(return_value=True))
                     call = getattr(adapter, method)
                     self.assertTrue(call() if argument is None else call(argument))
 
             changed = dict(expected); key = next(iter(changed)); changed[key] = not changed[key] if type(changed[key]) is bool else changed[key] + 1
-            runner = FakeRunner(outputs={0:json.dumps([{"results":[changed],"success":True,"meta":volatile[0]}])})
-            adapter = CloudflareProductionAdapter(self.config, self.repo, runner, FakeEvidenceRunner())
+            runner = FakeRunner(); evidence = FakeEvidenceRunner({"d1-query":[{"results":[changed],"success":True,"meta":volatile[0]}]})
+            adapter = CloudflareProductionAdapter(self.config, self.repo, runner, evidence)
             if label == "migration:0005":
                 adapter.ledger = mock.Mock(migration_accepted=mock.Mock(return_value=True))
             call = getattr(adapter, method)
@@ -298,7 +322,12 @@ class AdapterTests(unittest.TestCase):
         )
         for payload in payloads:
             with self.subTest(payload=payload[:80]):
-                adapter = CloudflareProductionAdapter(self.config, self.repo, FakeRunner(outputs={0:payload}), FakeEvidenceRunner())
+                class RawEnvelope(FakeEvidenceRunner):
+                    def collect(inner, mode, output, nonce, args):
+                        output.parent.mkdir(parents=True, exist_ok=True)
+                        output.write_bytes(payload)
+                        return CommandResult(True, "OK")
+                adapter = CloudflareProductionAdapter(self.config, self.repo, FakeRunner(), RawEnvelope())
                 self.assertFalse(adapter.prove_d1_baseline_0004())
 
     def test_canonical_post_import_query_recomputes_data_and_audit_proof(self):
@@ -348,10 +377,10 @@ class AdapterTests(unittest.TestCase):
 
     def test_post_rollback_has_independent_semantic_fixture(self):
         expected = {"anonymous":14,"owned":0,"users":0,"registrations":0}
-        runner = FakeRunner(outputs={0: json.dumps([{"results":[expected],"success":True,"meta":{}}])})
-        adapter = CloudflareProductionAdapter(self.config, self.repo, runner, FakeEvidenceRunner())
+        evidence = FakeEvidenceRunner({"d1-query":[{"results":[expected],"success":True,"meta":{}}]})
+        adapter = CloudflareProductionAdapter(self.config, self.repo, FakeRunner(), evidence)
         self.assertTrue(adapter.post_rollback_reconcile(20))
-        sql_path = Path(runner.calls[0][0][runner.calls[0][0].index("--file") + 1])
+        argv=evidence.calls[0][3]; sql_path = Path(argv[argv.index("--sql-file") + 1])
         self.assertEqual(sql_path.read_text(encoding="utf-8"),
                          "SELECT 'rollback-14-anon-0-owned-0-users-0-registrations'")
 
@@ -470,15 +499,14 @@ class AdapterTests(unittest.TestCase):
         self.assertEqual(runner.calls[3][0], ["deploy","--name","worker","--strict"])
 
     def test_migration_apply_exact_once_and_schema_verification(self):
-        runner = FakeRunner(outputs={1: json.dumps([{"results":[{"migration":True}],"success":True,"meta":{}}])})
-        adapter = CloudflareProductionAdapter(self.config, self.repo, runner)
+        runner = FakeRunner(); evidence=FakeEvidenceRunner({"d1-query":[{"results":[{"migration":True}],"success":True,"meta":{}}]})
+        adapter = CloudflareProductionAdapter(self.config, self.repo, runner, evidence)
         self.assertTrue(adapter.apply_migration_0005_once())
         self.assertTrue(adapter.apply_migration_0005_once())
         self.assertTrue(adapter.verify_migration_0005())
         self.assertEqual(runner.calls[0][0], ["d1", "migrations", "apply", "database", "--remote"])
-        query_argv = runner.calls[1][0]
-        self.assertEqual(query_argv[:5], ["d1", "execute", "database", "--remote", "--file"])
-        self.assertEqual(query_argv[-1], "--json")
+        query_argv = evidence.calls[0][3]
+        self.assertEqual(query_argv[:4], ["--account-id", "account", "--d1-id", "db-id"])
         self.assertEqual(Path(query_argv[5]).read_text(encoding="utf-8"), "SELECT 'migration-fixture'")
 
     def test_migration_nonzero_is_ambiguous_blocks_retry_and_has_private_receipt(self):
@@ -497,12 +525,12 @@ class AdapterTests(unittest.TestCase):
     def test_migration_accepted_reentry_requires_exact_receipt_and_schema(self):
         first = CloudflareProductionAdapter(self.config, self.repo, FakeRunner())
         self.assertTrue(first.apply_migration_0005_once())
-        runner = FakeRunner(outputs={0: json.dumps([{"results":[{"migration":True}],"success":True,"meta":{}}])})
-        resumed = CloudflareProductionAdapter(self.config, self.repo, runner)
+        runner = FakeRunner(); evidence=FakeEvidenceRunner({"d1-query":[{"results":[{"migration":True}],"success":True,"meta":{}}]})
+        resumed = CloudflareProductionAdapter(self.config, self.repo, runner, evidence)
         self.assertTrue(resumed.apply_migration_0005_once())
         self.assertEqual(runner.calls, [])
         self.assertTrue(resumed.verify_migration_0005())
-        self.assertEqual(len(runner.calls), 1)
+        self.assertEqual(len(evidence.calls), 1)
 
         envelope = json.loads((self.out / "mutation-receipts.json").read_text())
         envelope["payload"]["entries"][1]["fingerprint"] = "0" * 64
@@ -513,8 +541,8 @@ class AdapterTests(unittest.TestCase):
             CloudflareProductionAdapter(self.config, self.repo, FakeRunner()).apply_migration_0005_once()
 
     def test_migration_schema_mismatch_fails_closed(self):
-        runner = FakeRunner(outputs={1: json.dumps([{"results":[{"migration":False}],"success":True,"meta":{}}])})
-        adapter = CloudflareProductionAdapter(self.config, self.repo, runner)
+        runner = FakeRunner(); evidence=FakeEvidenceRunner({"d1-query":[{"results":[{"migration":False}],"success":True,"meta":{}}]})
+        adapter = CloudflareProductionAdapter(self.config, self.repo, runner, evidence)
         self.assertTrue(adapter.apply_migration_0005_once())
         self.assertFalse(adapter.verify_migration_0005())
 

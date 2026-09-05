@@ -9,6 +9,7 @@ const API = 'https://api.cloudflare.com/client/v4';
 const CANONICAL = 'contest.zoeg.studio';
 const ORIGIN = `https://${CANONICAL}`;
 const MAX_BODY = 1024 * 1024;
+const MAX_SQL = 1024 * 1024;
 const MAX_OBJECT = 25 * 1024 * 1024; // keep live evidence aligned with the Worker upload cap
 const TIMEOUT_MS = 15_000;
 const AUDIO_WINDOW_WAIT_MS = 61_000;
@@ -18,6 +19,7 @@ const repo = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const COMMON = ['mode', 'output', 'nonce'];
 const MODES = Object.freeze({
   'cloudflare-preflight': [...COMMON, 'account-id', 'zone-id', 'worker', 'd1-name', 'd1-id', 'r2-bucket', 'domain'],
+  'd1-query': [...COMMON, 'account-id', 'd1-id', 'sql-file'],
   'r2-object-metadata': [...COMMON, 'account-id', 'bucket', 'object-key'],
   'r2-public-access': [...COMMON, 'account-id', 'bucket'],
   'live-gate': [...COMMON, 'domain', 'r2-custom-domains-proof'],
@@ -39,10 +41,35 @@ export function parseArgs(argv) {
     out[key] = argv[i + 1]; i += 2;
   }
   if (!Object.hasOwn(MODES, out.mode) || Object.keys(out).length !== MODES[out.mode].length || MODES[out.mode].some(k => !Object.hasOwn(out,k))) fail();
-  if (!/^[0-9a-f]{64}$/.test(out.nonce) || !isAbsolute(out.output)) fail();
+  if (!/^[0-9a-f]{64}$/.test(out.nonce) || !isAbsolute(out.output) || (out.mode === 'd1-query' && !isAbsolute(out['sql-file']))) fail();
   if (out.mode === 'live-gate' && (out.domain !== CANONICAL || out['r2-custom-domains-proof'] !== true)) fail();
   if (out.mode === 'cloudflare-preflight' && out.domain !== CANONICAL) fail();
   return out;
+}
+
+async function privateRegularFile(path) {
+  const inside=p=>{const a=process.platform==='win32'?p.toLowerCase():p,b=process.platform==='win32'?repo.toLowerCase():repo;return a===b||a.startsWith(b+sep);};
+  if(!isAbsolute(path))fail();const supplied=resolve(path);if(inside(supplied))fail();
+  const parent=await realpath(dirname(supplied)).catch(fail),parentInfo=await lstat(parent).catch(fail);if(inside(parent)||!parentInfo.isDirectory()||(process.platform!=='win32'&&(parentInfo.mode&0o077)!==0))fail();
+  let cursor=parse(parent).root;for(const part of parent.slice(cursor.length).split(sep).filter(Boolean)){cursor=join(cursor,part);const i=await lstat(cursor).catch(fail);if(i.isSymbolicLink()||(i.mode&0o170000)===0o120000||(i.fileAttributes&0x400))fail();}
+  const before=await lstat(supplied).catch(fail);if(!before.isFile()||before.isSymbolicLink()||(before.fileAttributes&0x400)||(process.platform!=='win32'&&(before.mode&0o077)!==0)||before.size<1||before.size>MAX_SQL)fail();
+  const actual=await realpath(supplied).catch(fail);if(inside(actual))fail();
+  const bytes=await readFile(supplied).catch(fail),after=await lstat(supplied).catch(fail);if(bytes.length!==before.size||after.size!==before.size||after.mtimeMs!==before.mtimeMs)fail();return bytes;
+}
+
+function validateReadOnlySql(sql){
+  if(typeof sql!=='string'||!sql.trim()||sql.includes('\0')||/[\u0001-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(sql))fail();
+  let clean='';for(let i=0;i<sql.length;){const c=sql[i],n=sql[i+1];if(c==='-'&&n==='-'){clean+='  ';i+=2;while(i<sql.length&&sql[i]!=='\n'){clean+=' ';i++;}continue;}if(c==='/'&&n==='*'){clean+='  ';i+=2;let closed=false;while(i<sql.length){if(sql[i]==='*'&&sql[i+1]==='/'){clean+='  ';i+=2;closed=true;break;}clean+=sql[i]==='\n'?'\n':' ';i++;}if(!closed)fail();continue;}if(c==="'"||c==='"'||c==='`'||c==='['){const end=c==='['?']':c;clean+=' ';i++;let closed=false;while(i<sql.length){if(sql[i]===end){if(end!==']'&&sql[i+1]===end){clean+='  ';i+=2;continue;}clean+=' ';i++;closed=true;break;}clean+=sql[i]==='\n'?'\n':' ';i++;}if(!closed)fail();continue;}clean+=c;i++;}
+  const parts=clean.split(';');if(parts.at(-1).trim()==='')parts.pop();if(parts.length!==1||!parts[0].trim())fail();
+  const words=parts[0].match(/[A-Za-z_][A-Za-z0-9_]*/g)||[];if(!words.length||!['select','with'].includes(words[0].toLowerCase()))fail();
+  const forbidden=new Set(['insert','update','delete','replace','create','drop','alter','attach','detach','vacuum','reindex','analyze','pragma','begin','commit','rollback','savepoint','release']);if(words.some(w=>forbidden.has(w.toLowerCase())))fail();
+}
+
+export async function d1Query(a,token,fetchImpl=fetch,apiBase=API){
+  const bytes=await privateRegularFile(a['sql-file']);let sql;try{sql=new TextDecoder('utf-8',{fatal:true}).decode(bytes);}catch{fail();}validateReadOnlySql(sql);
+  const path=`accounts/${enc(a['account-id'])}/d1/database/${enc(a['d1-id'])}/query`,body=JSON.stringify({sql,params:[]});
+  const r=await timedFetch(fetchImpl,apiUrl(path,apiBase),{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body});if(r.status<200||r.status>=300)fail();
+  const v=await responseJson(r),keys=Object.keys(v);if(v.success!==true||!Array.isArray(v.result)||keys.some(k=>!['success','result','errors','messages'].includes(k))||(Object.hasOwn(v,'errors')&&(!Array.isArray(v.errors)||v.errors.length))||(Object.hasOwn(v,'messages')&&!Array.isArray(v.messages)))fail();return v.result;
 }
 
 async function safeOutput(path) {
@@ -53,9 +80,10 @@ async function safeOutput(path) {
   return {target,parent};
 }
 function depth(v,l=0){if(l>12)fail();if(Array.isArray(v)){if(v.length>10000)fail();for(const x of v)depth(x,l+1);}else if(v&&typeof v==='object'){const k=Object.keys(v);if(k.length>256)fail();for(const x of k)depth(v[x],l+1);}}
+function rejectDuplicateJsonKeys(text){let i=0;const ws=()=>{while(/\s/u.test(text[i]||''))i++;},str=()=>{const start=i++;for(;;){if(i>=text.length)fail();if(text[i]==='\\'){i+=2;continue;}if(text[i++]==='"')break;}try{return JSON.parse(text.slice(start,i));}catch{fail();}},value=()=>{ws();if(text[i]==='{'){i++;const seen=new Set;ws();if(text[i]==='}'){i++;return;}for(;;){ws();if(text[i]!=='"')fail();const key=str();if(seen.has(key))fail();seen.add(key);ws();if(text[i++]!==':')fail();value();ws();if(text[i]==='}'){i++;return;}if(text[i++]!==',')fail();}}else if(text[i]==='['){i++;ws();if(text[i]===']'){i++;return;}for(;;){value();ws();if(text[i]===']'){i++;return;}if(text[i++]!==',')fail();}}else if(text[i]==='"')str();else{const m=/^(?:-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)/.exec(text.slice(i));if(!m)fail();i+=m[0].length;}};value();ws();if(i!==text.length)fail();}
 async function timedFetch(fetchImpl,url,init={}){const c=new AbortController(),t=setTimeout(()=>c.abort(),TIMEOUT_MS);try{return await fetchImpl(url,{...init,redirect:'manual',signal:c.signal});}catch{fail();}finally{clearTimeout(t);}}
 function apiUrl(path,apiBase){const url=new URL(path,apiBase+'/');if(apiBase===API&&(url.origin!=='https://api.cloudflare.com'||!url.pathname.startsWith('/client/v4/')))fail();return url;}
-async function responseJson(r){const declared=r.headers.get('content-length');if(declared!==null&&(!/^\d+$/.test(declared)||Number(declared)>MAX_BODY))fail();const b=new Uint8Array(await r.arrayBuffer());if(b.length>MAX_BODY)fail();let v;try{v=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(b));}catch{fail();}depth(v);if(!v||typeof v!=='object'||Array.isArray(v))fail();return v;}
+async function responseJson(r){const declared=r.headers.get('content-length');if(declared!==null&&(!/^\d+$/.test(declared)||Number(declared)>MAX_BODY))fail();const b=new Uint8Array(await r.arrayBuffer());if(b.length>MAX_BODY)fail();let v;try{const text=new TextDecoder('utf-8',{fatal:true}).decode(b);rejectDuplicateJsonKeys(text);v=JSON.parse(text);}catch{fail();}depth(v);if(!v||typeof v!=='object'||Array.isArray(v))fail();return v;}
 async function apiJson(path,token,fetchImpl,apiBase=API){
   const r=await timedFetch(fetchImpl,apiUrl(path,apiBase),{headers:{Authorization:`Bearer ${token}`}});if(r.status<200||r.status>=300)fail();const v=await responseJson(r);if(v.success!==true||!Object.hasOwn(v,'result'))fail();return v.result;
 }
@@ -160,7 +188,7 @@ export function validatePageWebSocketUrl(value,port){if(typeof value!=='string'|
 async function waitForEdgeExit(edge){await new Promise(resolveWait=>{let timer,settled=false;const finish=()=>{if(settled)return;settled=true;if(timer!==undefined)clearTimeout(timer);try{edge.removeListener('exit',finish);}catch{}resolveWait();};try{if(edge.exitCode!=null||edge.signalCode!=null){finish();return;}timer=setTimeout(finish,1000);try{edge.once('exit',finish);}catch{finish();return;}if(edge.exitCode!=null||edge.signalCode!=null)finish();}catch{finish();}});}
 export async function collectBrowserEvidence({origin,edgeLauncher=spawn,cdpTransport}){let edge,temp,session;try{let executable;for(const p of EDGE_PATHS){try{const i=await lstat(p);if(i.isFile()){executable=p;break;}}catch{}}if(!executable)fail();temp=await mkdtemp(join(tmpdir(),'live-edge-'));edge=edgeLauncher(executable,['--headless=new','--disable-gpu','--no-first-run','--remote-debugging-port=0',`--user-data-dir=${temp}`,'about:blank'],{shell:false,stdio:'ignore'});const deadline=Date.now()+TIMEOUT_MS;let active;while(Date.now()<deadline){try{active=parseDevToolsActivePort(await readFile(join(temp,'DevToolsActivePort'),'utf8'));break;}catch{await new Promise(r=>setTimeout(r,50));}}if(!active)fail();const list=await timedFetch(fetch,`http://127.0.0.1:${active.port}/json/new?${encodeURIComponent(origin)}`,{method:'PUT'});if(list.status!==200||!/^application\/json(?:\s*;|$)/i.test(list.headers.get('content-type')||''))fail();const body=await bodyBytes(list,MAX_BODY);let target;try{target=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(body));}catch{fail();}const webSocketUrl=validatePageWebSocketUrl(target?.webSocketDebuggerUrl,active.port);session=cdpTransport?await cdpTransport({webSocketUrl,origin}):await webSocketSession(webSocketUrl);return await collectCdpEvidence({origin,session});}catch{fail();}finally{try{await session?.close?.();}catch{}if(edge){try{edge.kill();}catch{}try{await waitForEdgeExit(edge);}catch{}}if(temp)try{await rm(temp,{recursive:true,force:true});}catch{}}}
 
-async function runMode(a,token){if(a.mode==='cloudflare-preflight')return cloudflarePreflight(a,token);if(a.mode==='r2-public-access')return publicAccess(a,token);if(a.mode==='r2-object-metadata')return r2ObjectMetadata(a,token);if(a.mode==='live-gate')return collectLiveGate(a);fail();}
+async function runMode(a,token){if(a.mode==='cloudflare-preflight')return cloudflarePreflight(a,token);if(a.mode==='d1-query')return d1Query(a,token);if(a.mode==='r2-public-access')return publicAccess(a,token);if(a.mode==='r2-object-metadata')return r2ObjectMetadata(a,token);if(a.mode==='live-gate')return collectLiveGate(a);fail();}
 async function atomicWrite(path,envelope){const{target,parent}=await safeOutput(path),temp=join(parent,`.live-evidence-${randomBytes(16).toString('hex')}`);let h;try{h=await open(temp,'wx',0o600);await h.writeFile(JSON.stringify(envelope));await h.sync();await h.close();h=undefined;await chmod(temp,0o600).catch(()=>{});await rename(temp,target);const d=await open(parent,'r').catch(()=>null);if(d){await d.sync().catch(()=>{});await d.close();}}catch(e){if(h)await h.close().catch(()=>{});await unlink(temp).catch(()=>{});throw e;}}
 export function parseLiveDiagnostic(value){return value&&Object.keys(value).length===1&&LIVE_DIAGNOSTIC_GATES.includes(value.gate)?value.gate:null;}
 export async function writeLiveDiagnostic(path,value){const gate=parseLiveDiagnostic(value);if(!gate)fail();await atomicWrite(path,{gate});}

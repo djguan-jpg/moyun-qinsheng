@@ -390,7 +390,7 @@ class EvidenceRunner:
         self.node = Path(node).resolve(strict=True) if node else None
 
     def collect(self, mode: str, output: Path, nonce: str, args: Sequence[str]) -> CommandResult:
-        if mode not in {"cloudflare-preflight", "r2-object-metadata", "r2-public-access", "live-gate"} or self.node is None or not self.script.is_file():
+        if mode not in {"cloudflare-preflight", "d1-query", "r2-object-metadata", "r2-public-access", "live-gate"} or self.node is None or not self.script.is_file():
             return CommandResult(False, "EVIDENCE_RUNNER_MISSING")
         try:
             env, token = _token_env(self.token_file)
@@ -562,8 +562,8 @@ class CloudflareProductionAdapter:
         safe = label.replace(":", "-")
         evidence_id = secrets.token_hex(16)
         sql_path = self._evidence(f"query-{safe}-{evidence_id}.sql")
-        raw_path = self._evidence(f"query-{safe}-{evidence_id}.raw")
-        if sql_path.exists() or raw_path.exists():
+        result_path = self._evidence(f"query-{safe}-{evidence_id}.json")
+        if sql_path.exists() or result_path.exists():
             raise ProductionSafetyError("STALE_EVIDENCE")
         temporary: str | None = None
         try:
@@ -581,9 +581,19 @@ class CloudflareProductionAdapter:
                 try: os.unlink(temporary)
                 except OSError: temporary = None
             return None
-        if not self._run(["d1", "execute", self.config.d1_name, "--remote", "--file", str(sql_path), "--json"], raw_path.name): return None
         try:
-            return _decode_wrangler_query_json(raw_path.read_bytes())
+            expected_sql_hash = hashlib.sha256(spec.sql.encode("utf-8")).hexdigest()
+            if _sha256(sql_path) != expected_sql_hash:
+                return None
+            value = self._collect(
+                "d1-query", result_path.name,
+                ["--account-id", self.config.account_id, "--d1-id", self.config.d1_id,
+                 "--sql-file", str(sql_path)],
+                parse_wrangler_query_json,
+            )
+            if _sha256(sql_path) != expected_sql_hash or sql_path.read_bytes() != spec.sql.encode("utf-8"):
+                return None
+            return value
         except Exception: return None
 
     def prove_d1_baseline_0004(self) -> bool:
