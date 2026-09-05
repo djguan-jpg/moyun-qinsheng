@@ -147,6 +147,16 @@ test('R2 exact object path preserves slash, safely encodes segments, and returns
   assert.deepEqual(got,{content_type:'audio/mpeg',size:mp3.length,sha256:createHash('sha256').update(mp3).digest('hex')});assert.deepEqual(Object.keys(got).sort(),['content_type','sha256','size']);
 });
 
+test('R2 metadata accepts valid audio through 25 MiB and rejects declared or streamed overflow',async()=>{
+  const cap=25*1024*1024, accepted=10*1024*1024, chunkSize=64*1024;
+  const wavStream=(size)=>{let offset=0;return new ReadableStream({pull(controller){if(offset>=size){controller.close();return;}const length=Math.min(chunkSize,size-offset),chunk=Buffer.alloc(length);if(offset===0)Buffer.from('RIFF\0\0\0\0WAVE').copy(chunk);offset+=length;controller.enqueue(chunk);}});};
+  const response=(size,declared=String(size))=>new Response(wavStream(size),{status:200,headers:{'content-type':'audio/wav',...(declared===null?{}:{'content-length':declared})}});
+  const got=await r2ObjectMetadata({'account-id':'a',bucket:'bbb','object-key':'audio.wav'},'private',async()=>response(accepted),'http://127.0.0.1:1/client/v4');
+  assert.equal(got.size,accepted);assert.equal(got.content_type,'audio/wav');assert.match(got.sha256,/^[0-9a-f]{64}$/);
+  await assert.rejects(()=>r2ObjectMetadata({'account-id':'a',bucket:'bbb','object-key':'audio.wav'},'private',async()=>response(1,String(cap+1)),'http://127.0.0.1:1/client/v4'),/LIVE_EVIDENCE_ERROR/);
+  await assert.rejects(()=>r2ObjectMetadata({'account-id':'a',bucket:'bbb','object-key':'audio.wav'},'private',async()=>response(cap+1,null),'http://127.0.0.1:1/client/v4'),/LIVE_EVIDENCE_ERROR/);
+});
+
 test('R2 key and response failures are closed, including traversal, redirect, status, truncation, MIME and magic',async()=>{
   for(const key of ['','a//b','./a','a/../b','a\\b','a\0b','x'.repeat(1025)])await assert.rejects(()=>r2ObjectMetadata({'account-id':'a',bucket:'bbb','object-key':key},'x',()=>assert.fail()));
   const cases=[new Response('',{status:302,headers:{location:'/else'}}),new Response('provider private body',{status:500}),new Response(mp3,{status:200,headers:{'content-type':'audio/mpeg','content-length':'999999999'}}),new Response(mp3,{status:200,headers:{'content-type':'text/plain','content-length':String(mp3.length)}}),new Response(Buffer.from('not audio'),{status:200,headers:{'content-type':'audio/mpeg','content-length':'9'}}),new Response(mp3,{status:200,headers:{'content-type':'audio/mpeg','content-length':'99'}})];
