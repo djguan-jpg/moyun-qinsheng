@@ -506,6 +506,8 @@ class AdapterTests(unittest.TestCase):
             "PUBLIC ACCESS VIA THE R2.DEV URL IS DISABLED.",
             "  Public   access via the r2.dev URL is   disabled.  ",
             "Public access via the r2.dev URL is disabled.\n",
+            "\n⛅\ufe0f wrangler 4.127.1 (update available 4.129.0)\n────────\nPublic access via the r2.dev URL is disabled.\n",
+            "⛅\ufe0f wrangler 4.127.1\n--------\nPublic access via the r2.dev URL is disabled.",
         ):
             self.assertTrue(parse_dev_url_disabled(text))
         for text in (
@@ -513,6 +515,10 @@ class AdapterTests(unittest.TestCase):
             "Public access via the r2.dev URL is enabled.",
             "Public access via r2.dev URL is disabled.",
             '{"message":"Public access via the r2.dev URL is disabled."}',
+            "⛅\ufe0f wrangler 4.127.1\n───\nlog: checking bucket\nPublic access via the r2.dev URL is disabled.",
+            "⛅\ufe0f wrangler v4.127.1\n───\nPublic access via the r2.dev URL is disabled.",
+            "⛅\ufe0f wrangler 4.127.1\n───\nPublic access via the r2.dev URL is enabled.",
+            '⛅\ufe0f wrangler 4.127.1\n───\n{"message":"Public access via the r2.dev URL is disabled."}',
             "",
         ):
             self.assertFalse(parse_dev_url_disabled(text))

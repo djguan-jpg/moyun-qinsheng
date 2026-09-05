@@ -669,8 +669,20 @@ def verify_sqlite_export(sql_path: Path) -> bool:
 
 
 def parse_dev_url_disabled(text: str) -> bool:
-    normalized = " ".join(text.lower().split())
-    return normalized in {
+    lines = [" ".join(line.split()) for line in text.splitlines() if line.split()]
+    banner = re.compile(
+        r"(?:\u26c5\ufe0f? )?wrangler [0-9]+\.[0-9]+\.[0-9]+"
+        r"(?: \(update available [0-9]+\.[0-9]+\.[0-9]+\))?"
+    )
+    separator = re.compile(r"[-\u2500\u2501\u2504\u2505\u2508\u2509\u254c\u254d\u2550]{3,}")
+    if sum(banner.fullmatch(line) is not None for line in lines) > 1:
+        return False
+    if sum(separator.fullmatch(line) is not None for line in lines) > 1:
+        return False
+    remaining = [line for line in lines if banner.fullmatch(line) is None and separator.fullmatch(line) is None]
+    if len(remaining) != 1:
+        return False
+    return remaining[0].lower() in {
         "disabled",
         "not enabled",
         "r2.dev url: disabled",
