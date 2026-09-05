@@ -567,8 +567,14 @@ class AdapterTests(unittest.TestCase):
         adapter = CloudflareProductionAdapter(self.config, self.repo, FakeRunner(outputs={0:b"ID3\0"}), evidence)
         adapter._verify_object(self.new[0], "proof.bin")
         self.assertEqual(evidence.calls[0][3], ["--account-id","account","--bucket","bucket","--object-key","new-0"])
-        adapter = CloudflareProductionAdapter(self.config, self.repo, FakeRunner(outputs={0:"R2.dev URL: disabled",1:"{}"}), evidence)
-        self.assertTrue(adapter.prove_r2_private())
+        adapter = CloudflareProductionAdapter(self.config, self.repo, FakeRunner(outputs={0:"\n⛅️ wrangler 4.127.1 (update available 4.129.0)\n────────\nPublic access via the r2.dev URL is disabled.\n".encode("utf-8"),1:"{}"}), evidence)
+        original_read_text = Path.read_text
+        def assert_r2_dev_url_encoding(path, *args, **kwargs):
+            if path.name == "r2-dev-url.raw":
+                self.assertEqual(kwargs, {"encoding":"utf-8"})
+            return original_read_text(path, *args, **kwargs)
+        with mock.patch.object(Path, "read_text", assert_r2_dev_url_encoding):
+            self.assertTrue(adapter.prove_r2_private())
         self.assertEqual(evidence.calls[-1][3], ["--account-id","account","--bucket","bucket"])
         self.out.joinpath("r2-custom-domains.json").unlink()
         adapter = CloudflareProductionAdapter(self.config, self.repo, FakeRunner(), evidence)

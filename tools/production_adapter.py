@@ -554,7 +554,7 @@ class CloudflareProductionAdapter:
         if not self._run(["r2", "bucket", "dev-url", "get", self.config.r2_bucket], "r2-dev-url.raw"): return False
         if not self._run(["r2", "bucket", "info", self.config.r2_bucket, "--json"], "r2-info-advisory.raw"): return False
         custom = self._collect("r2-public-access", "r2-custom-domains.json", ["--account-id", self.config.account_id, "--bucket", self.config.r2_bucket], parse_public_access)
-        return parse_dev_url_disabled(self._evidence("r2-dev-url.raw").read_text()) and custom is True
+        return parse_dev_url_disabled(self._evidence("r2-dev-url.raw").read_text(encoding="utf-8")) and custom is True
 
     def _query(self, label: str) -> Any:
         if label not in QUERY_LABELS or label not in self.config.expected_queries: return None
