@@ -6,7 +6,6 @@ import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { collectBrowserEvidence, collectCdpEvidence, collectLiveGate, cloudflarePreflight, d1Query, FUNCTIONAL_AUDIO_PACE_MS, LIVE_BOOLEAN_GATES, LIVE_COUNT_GATES, LIVE_DIAGNOSTIC_GATES, parseArgs, parseLiveDiagnostic, publicAccess, r2ObjectMetadata, writeLiveDiagnostic } from '../tools/live_evidence.mjs';
-import { createHash } from 'node:crypto';
 
 const nonce = 'a'.repeat(64);
 const common = ['--mode','r2-public-access','--output',resolve(tmpdir(),'evidence-never-created'),'--nonce',nonce,'--account-id','acct','--bucket','bucket'];
@@ -163,27 +162,35 @@ test('symlink parent traversal is rejected when platform permits it', async (t) 
 });
 
 const mp3=Buffer.from([0x49,0x44,0x33,1,2,3,4,5]);
-test('R2 exact object path preserves slash, safely encodes segments, and returns only normalized metadata',async()=>{
-  let seen;
-  const fetchImpl=async(url,init)=>{seen={url:String(url),init};return new Response(mp3,{status:200,headers:{'content-type':'Audio/MPEG; charset=binary','content-length':String(mp3.length)}})};
-  const got=await r2ObjectMetadata({'account-id':'a c','bucket':'b#c','object-key':'目 錄/a?#.mp3'},'private',fetchImpl,'http://127.0.0.1:1/client/v4');
-  assert.match(seen.url,/accounts\/a%20c\/r2\/buckets\/b%23c\/objects\/%E7%9B%AE%20%E9%8C%84\/a%3F%23\.mp3$/);assert.doesNotMatch(seen.url,/%2F/i);assert.equal(seen.init.redirect,'manual');
-  assert.deepEqual(got,{content_type:'audio/mpeg',size:mp3.length,sha256:createHash('sha256').update(mp3).digest('hex')});assert.deepEqual(Object.keys(got).sort(),['content_type','sha256','size']);
+const listEnvelope=(result,resultInfo={page:1,per_page:10,count:result.length,total_count:result.length,total_pages:1})=>({success:true,result,errors:[],messages:[],result_info:resultInfo});
+const listItem=(key,size=23_646_892,contentType='Audio/MPEG; charset=binary')=>({key,size,uploaded:'2026-01-01T00:00:00Z',etag:'not-a-sha256',http_metadata:{contentType},custom_metadata:{}});
+const jsonResponse=(value,options={})=>{const body=typeof value==='string'?value:JSON.stringify(value);return new Response(body,{status:options.status??200,headers:{'content-type':'application/json','content-length':options.length??String(Buffer.byteLength(body)),...(options.headers||{})}});};
+
+test('R2 list uses exact bounded prefix GET, authorization only, and minimum normalized metadata',async()=>{
+  let seen;const key='目 錄/a?#.mp3';
+  const fetchImpl=async(url,init)=>{seen={url:new URL(url),init};return jsonResponse(listEnvelope([listItem(key)]));};
+  const got=await r2ObjectMetadata({'account-id':'a c','bucket':'b#c','object-key':key},'private',fetchImpl,'http://127.0.0.1:1/client/v4');
+  assert.equal(seen.url.pathname,'/client/v4/accounts/a%20c/r2/buckets/b%23c/objects');assert.equal(seen.url.search,'?prefix=%E7%9B%AE+%E9%8C%84%2Fa%3F%23.mp3&per_page=10');
+  assert.equal(seen.init.method,'GET');assert.equal(seen.init.redirect,'manual');assert.deepEqual(seen.init.headers,{Authorization:'Bearer private'});assert.equal(Object.hasOwn(seen.init,'body'),false);
+  assert.deepEqual(got,{content_type:'audio/mpeg',size:23_646_892});assert.deepEqual(Object.keys(got).sort(),['content_type','size']);
 });
 
-test('R2 metadata accepts valid audio through 25 MiB and rejects declared or streamed overflow',async()=>{
-  const cap=25*1024*1024, accepted=10*1024*1024, chunkSize=64*1024;
-  const wavStream=(size)=>{let offset=0;return new ReadableStream({pull(controller){if(offset>=size){controller.close();return;}const length=Math.min(chunkSize,size-offset),chunk=Buffer.alloc(length);if(offset===0)Buffer.from('RIFF\0\0\0\0WAVE').copy(chunk);offset+=length;controller.enqueue(chunk);}});};
-  const response=(size,declared=String(size))=>new Response(wavStream(size),{status:200,headers:{'content-type':'audio/wav',...(declared===null?{}:{'content-length':declared})}});
-  const got=await r2ObjectMetadata({'account-id':'a',bucket:'bbb','object-key':'audio.wav'},'private',async()=>response(accepted),'http://127.0.0.1:1/client/v4');
-  assert.equal(got.size,accepted);assert.equal(got.content_type,'audio/wav');assert.match(got.sha256,/^[0-9a-f]{64}$/);
-  await assert.rejects(()=>r2ObjectMetadata({'account-id':'a',bucket:'bbb','object-key':'audio.wav'},'private',async()=>response(1,String(cap+1)),'http://127.0.0.1:1/client/v4'),/LIVE_EVIDENCE_ERROR/);
-  await assert.rejects(()=>r2ObjectMetadata({'account-id':'a',bucket:'bbb','object-key':'audio.wav'},'private',async()=>response(cap+1,null),'http://127.0.0.1:1/client/v4'),/LIVE_EVIDENCE_ERROR/);
+test('R2 23.6 MB ObjectSpec requires only a small list metadata response and never downloads object bytes',async()=>{
+  const key='large/audio.mp3',body=JSON.stringify(listEnvelope([listItem(key,23_646_892)]));let calls=0;
+  const got=await r2ObjectMetadata({'account-id':'a',bucket:'bbb','object-key':key},'private',async()=>{calls++;return jsonResponse(body);},'http://127.0.0.1:1/client/v4');
+  assert.equal(calls,1);assert.equal(got.size,23_646_892);assert.ok(Buffer.byteLength(body)<1024);
 });
 
-test('R2 key and response failures are closed, including traversal, redirect, status, truncation, MIME and magic',async()=>{
+test('R2 list rejects absent, longer-prefix-only, duplicate, invalid metadata and ambiguous pagination',async()=>{
+  const args={'account-id':'a',bucket:'bbb','object-key':'a/b.mp3'},call=value=>r2ObjectMetadata(args,'private',async()=>jsonResponse(value),'http://127.0.0.1:1/client/v4');
+  const good=listItem(args['object-key'],8,'audio/mpeg');
+  const cases=[listEnvelope([]),listEnvelope([listItem('a/b.mp3.more',8)]),listEnvelope([good,{...good}]),listEnvelope([{...good,key:'wrong'}]),listEnvelope([{...good,size:8.5}]),listEnvelope([{...good,size:-1}]),listEnvelope([{...good,size:25*1024*1024+1}]),listEnvelope([{...good,http_metadata:{contentType:'text/plain'}}]),listEnvelope([{...good,http_metadata:{}}]),listEnvelope([{...good,unexpected:true}]),listEnvelope([good],{page:1,per_page:10,count:1,total_count:2,total_pages:1}),listEnvelope([good],{page:1,per_page:10,count:1,total_count:1,total_pages:2}),listEnvelope([good],{page:1,per_page:10,count:1,total_count:1,total_pages:1,cursor:'next'}),{...listEnvelope([good]),result:{}},{...listEnvelope([good]),extra:true}];
+  for(const value of cases)await assert.rejects(()=>call(value),/LIVE_EVIDENCE_ERROR/);
+});
+
+test('R2 key and list response failures are closed, including redirect, status, oversize and malformed body',async()=>{
   for(const key of ['','a//b','./a','a/../b','a\\b','a\0b','x'.repeat(1025)])await assert.rejects(()=>r2ObjectMetadata({'account-id':'a',bucket:'bbb','object-key':key},'x',()=>assert.fail()));
-  const cases=[new Response('',{status:302,headers:{location:'/else'}}),new Response('provider private body',{status:500}),new Response(mp3,{status:200,headers:{'content-type':'audio/mpeg','content-length':'999999999'}}),new Response(mp3,{status:200,headers:{'content-type':'text/plain','content-length':String(mp3.length)}}),new Response(Buffer.from('not audio'),{status:200,headers:{'content-type':'audio/mpeg','content-length':'9'}}),new Response(mp3,{status:200,headers:{'content-type':'audio/mpeg','content-length':'99'}})];
+  const cases=[new Response('',{status:302,headers:{location:'/else'}}),new Response('provider private body',{status:500}),jsonResponse('{}',{length:String(1024*1024+1)}),new Response(Buffer.alloc(1024*1024+1),{status:200}),jsonResponse('not-json'),jsonResponse('{"success":true,"result":[],"result":[]}'),jsonResponse([])];
   for(const response of cases)await assert.rejects(()=>r2ObjectMetadata({'account-id':'a',bucket:'bbb','object-key':'a/b.mp3'},'private',async()=>response,'http://127.0.0.1:1/client/v4'),/LIVE_EVIDENCE_ERROR/);
   await assert.rejects(()=>r2ObjectMetadata({'account-id':'a',bucket:'bbb','object-key':'a.mp3'},'x',async(_u,{signal})=>new Promise((_,no)=>signal.addEventListener('abort',()=>no(new Error('private timeout')))),'http://127.0.0.1:1/client/v4'),/LIVE_EVIDENCE_ERROR/);
 },{timeout:17000});

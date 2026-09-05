@@ -543,8 +543,9 @@ class CloudflareProductionAdapter:
         output = self._evidence(suffix); metadata = self._evidence(suffix + ".metadata.json")
         if output.exists() or metadata.exists(): raise ProductionSafetyError("STALE_EVIDENCE")
         if not self._run(["r2", "object", "get", f"{self.config.r2_bucket}/{spec.key}", "--remote", "--file", str(output)], suffix + ".command.raw"): return False
+        file_ok = verify_object_file(output, spec)
         value = self._collect("r2-object-metadata", suffix + ".metadata.json", ["--account-id", self.config.account_id, "--bucket", self.config.r2_bucket, "--object-key", spec.key], parse_object_metadata)
-        return value == {"content_type": spec.mime, "size": spec.size, "sha256": spec.sha256} and verify_object_file(output, spec)
+        return file_ok and value == {"content_type": spec.mime, "size": spec.size}
 
     def verify_legacy_r2_backup(self, keys: tuple[str, ...]) -> bool:
         specs = {x.key: x for x in self.config.legacy}
@@ -732,8 +733,9 @@ def parse_public_access(value: Any) -> bool:
 
 
 def parse_object_metadata(value: Any) -> Any:
-    if type(value) is not dict or set(value) != {"content_type", "size", "sha256"}: return None
-    if type(value["content_type"]) is not str or type(value["size"]) is not int or type(value["sha256"]) is not str: return None
+    if type(value) is not dict or set(value) != {"content_type", "size"}: return None
+    if (value["content_type"] not in {"audio/mpeg", "audio/wav", "audio/x-wav", "audio/ogg", "audio/mp4", "audio/x-m4a"}
+            or type(value["size"]) is not int or not 0 < value["size"] <= 25 * 1024 * 1024): return None
     return value
 
 

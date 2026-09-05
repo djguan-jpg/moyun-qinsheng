@@ -1,7 +1,7 @@
 import { chmod, lstat, mkdtemp, open, readFile, realpath, rename, rm, unlink } from 'node:fs/promises';
 import { dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash, randomBytes } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 
@@ -96,12 +96,19 @@ function objectPath(key){if(typeof key!=='string'||key.length<1||key.length>1024
 function normalizedMime(v){if(typeof v!=='string')fail();return v.split(';',1)[0].trim().toLowerCase();}
 function magicOk(m,b){if(m==='audio/mpeg')return (b[0]===0x49&&b[1]===0x44&&b[2]===0x33)||(b[0]===0xff&&(b[1]&0xe0)===0xe0);if(m==='audio/wav'||m==='audio/x-wav')return b.subarray(0,4).toString()==='82,73,70,70'&&b.subarray(8,12).toString()==='87,65,86,69';if(m==='audio/ogg')return b.subarray(0,4).toString()==='79,103,103,83';if(m==='audio/mp4'||m==='audio/x-m4a')return b.length>=12&&b[4]===0x66&&b[5]===0x74&&b[6]===0x79&&b[7]===0x70;return false;}
 export async function r2ObjectMetadata(a,token,fetchImpl=fetch,apiBase=API){
-  const path=`accounts/${enc(a['account-id'])}/r2/buckets/${enc(a.bucket)}/objects/${objectPath(a['object-key'])}`;const url=new URL(path,apiBase+'/');if(apiBase===API&&(url.origin!=='https://api.cloudflare.com'||!url.pathname.startsWith('/client/v4/')))fail();
-  const r=await timedFetch(fetchImpl,url,{method:'GET',headers:{Authorization:`Bearer ${token}`}});if(r.status<200||r.status>=300)fail();const declared=r.headers.get('content-length');if(declared!==null&&(!/^\d+$/.test(declared)||Number(declared)>MAX_OBJECT))fail();
-  const mime=normalizedMime(r.headers.get('content-type'));if(!['audio/mpeg','audio/wav','audio/x-wav','audio/ogg','audio/mp4','audio/x-m4a'].includes(mime)||!r.body)fail();
-  const hash=createHash('sha256'),prefix=[];let size=0;const reader=r.body.getReader();try{for(;;){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>MAX_OBJECT){await reader.cancel();fail();}hash.update(value);for(const x of value)if(prefix.length<16)prefix.push(x);}}catch(e){if(e instanceof EvidenceError)throw e;fail();}
-  if(declared!==null&&Number(declared)!==size)fail();if(!magicOk(mime,Uint8Array.from(prefix)))fail();return{content_type:mime,size,sha256:hash.digest('hex')};
+  objectPath(a['object-key']);const path=`accounts/${enc(a['account-id'])}/r2/buckets/${enc(a.bucket)}/objects`;const url=apiUrl(path,apiBase);url.searchParams.set('prefix',a['object-key']);url.searchParams.set('per_page','10');
+  const r=await timedFetch(fetchImpl,url,{method:'GET',headers:{Authorization:`Bearer ${token}`}});if(r.status<200||r.status>=300)fail();const v=await responseJson(r);
+  if(setMismatch(v,['success','result','errors','messages','result_info'])||v.success!==true||!Array.isArray(v.result)||!Array.isArray(v.errors)||v.errors.length||!Array.isArray(v.messages)||v.messages.length)fail();
+  const info=v.result_info;if(!info||typeof info!=='object'||Array.isArray(info)||setMismatch(info,['page','per_page','count','total_count','total_pages']))fail();
+  if(info.page!==1||info.per_page!==10||info.count!==v.result.length||info.total_count!==v.result.length||info.total_pages!==1||v.result.length>10)fail();
+  const exact=v.result.filter(x=>x&&typeof x==='object'&&!Array.isArray(x)&&x.key===a['object-key']);if(exact.length!==1)fail();const item=exact[0];
+  const allowed=new Set(['key','size','uploaded','etag','http_metadata','custom_metadata']);if(Object.keys(item).some(k=>!allowed.has(k))||!Object.hasOwn(item,'size')||!Object.hasOwn(item,'http_metadata'))fail();
+  if(!Number.isSafeInteger(item.size)||item.size<1||item.size>MAX_OBJECT||!item.http_metadata||typeof item.http_metadata!=='object'||Array.isArray(item.http_metadata))fail();
+  const httpAllowed=new Set(['contentType','contentLanguage','contentDisposition','contentEncoding','cacheControl','cacheExpiry']);if(Object.keys(item.http_metadata).some(k=>!httpAllowed.has(k))||!Object.hasOwn(item.http_metadata,'contentType'))fail();
+  const mime=normalizedMime(item.http_metadata.contentType);if(!['audio/mpeg','audio/wav','audio/x-wav','audio/ogg','audio/mp4','audio/x-m4a'].includes(mime))fail();return{content_type:mime,size:item.size};
 }
+
+function setMismatch(value,keys){return !value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length!==keys.length||keys.some(k=>!Object.hasOwn(value,k));}
 
 const forbiddenHost = new RegExp(['ss','lip|qin','sheng\\.zoeg\\.studio|161-33-|185-80'].join(''), 'i');
 function sameOrigin(value,origin){try{return new URL(value,origin).origin===new URL(origin).origin;}catch{return false;}}

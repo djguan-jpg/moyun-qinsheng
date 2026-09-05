@@ -563,7 +563,7 @@ class AdapterTests(unittest.TestCase):
         self.assertFalse(adapter.import_d1_once()); self.assertEqual(adapter.runner.calls, [])
 
     def test_receipts_use_six_indexes_no_keys_and_existing_blocks_all_mutation(self):
-        runner = FakeRunner(); evidence = FakeEvidenceRunner({"r2-object-metadata":{"content_type":"audio/mpeg","size":4,"sha256":"bad"}})
+        runner = FakeRunner(); evidence = FakeEvidenceRunner({"r2-object-metadata":{"content_type":"audio/mpeg","size":4}})
         adapter = CloudflareProductionAdapter(self.config, self.repo, runner, evidence)
         for spec in self.new:
             adapter.upload_new_key(spec.key)
@@ -591,6 +591,22 @@ class AdapterTests(unittest.TestCase):
         for bad in (dataclasses.replace(self.new[0], size=99), dataclasses.replace(self.new[0], sha256="0"*64), dataclasses.replace(self.new[0], magic_hex="ffff")):
             self.assertFalse(verify_object_file(self.new[0].source, bad))
         self.assertEqual(self.new[0].mime, "audio/mpeg")
+
+    def test_verify_object_requires_exact_wrangler_file_and_control_plane_metadata(self):
+        spec = self.new[0]; exact = spec.source.read_bytes()
+        class DownloadRunner(FakeRunner):
+            def __init__(self, downloaded): super().__init__(); self.downloaded = downloaded
+            def _wrangler(self, args, evidence_file=None, mutation=False):
+                result = super()._wrangler(args, evidence_file, mutation)
+                Path(args[args.index("--file") + 1]).write_bytes(self.downloaded)
+                return result
+        good = FakeEvidenceRunner({"r2-object-metadata":{"content_type":spec.mime,"size":spec.size}})
+        self.assertTrue(CloudflareProductionAdapter(self.config, self.repo, DownloadRunner(exact), good)._verify_object(spec, "good.bin"))
+        wrong_file = FakeEvidenceRunner({"r2-object-metadata":{"content_type":spec.mime,"size":spec.size}})
+        self.assertFalse(CloudflareProductionAdapter(self.config, self.repo, DownloadRunner(b"ID3x"), wrong_file)._verify_object(spec, "wrong-file.bin"))
+        for i, metadata in enumerate(({"content_type":"audio/wav","size":spec.size},{"content_type":spec.mime,"size":spec.size+1})):
+            evidence = FakeEvidenceRunner({"r2-object-metadata":metadata})
+            self.assertFalse(CloudflareProductionAdapter(self.config, self.repo, DownloadRunner(exact), evidence)._verify_object(spec, f"wrong-metadata-{i}.bin"))
 
     def test_sql_export_restore_integrity_and_foreign_keys(self):
         good = self.private / "good.sql"; good.write_text("PRAGMA foreign_keys=ON; CREATE TABLE p(id PRIMARY KEY); CREATE TABLE c(p REFERENCES p(id)); INSERT INTO p VALUES(1); INSERT INTO c VALUES(1);")
@@ -629,8 +645,10 @@ class AdapterTests(unittest.TestCase):
         preflight = {name:True for name in ("account_match","zone_match","worker_match","d1_match","r2_match","canonical_domain_match","resource_ids_match")}
         self.assertTrue(parse_resource_preflight(preflight))
         for bad in ({**preflight,"extra":True}, {**preflight,"d1_match":False}, {**preflight,"d1_match":1}, {}): self.assertFalse(parse_resource_preflight(bad))
-        metadata = {"content_type":"audio/mpeg","size":4,"sha256":"a"*64}
+        metadata = {"content_type":"audio/mpeg","size":4}
         self.assertEqual(parse_object_metadata(metadata), metadata); self.assertIsNone(parse_object_metadata({**metadata,"extra":1}))
+        for bad in ({"content_type":"audio/mpeg","size":True},{"content_type":1,"size":4},{"content_type":"","size":4},{"content_type":"text/plain","size":4},{"content_type":"audio/mpeg","size":0},{"content_type":"audio/mpeg","size":25*1024*1024+1},{"content_type":"audio/mpeg","size":4,"sha256":"a"*64},[],None):
+            self.assertIsNone(parse_object_metadata(bad))
         self.assertTrue(parse_public_access({"dev_url_disabled":True,"custom_domains_disabled":True})); self.assertFalse(parse_public_access({"dev_url_disabled":True,"custom_domains_disabled":False}))
         live = {x:True for x in __import__('tools.production_state_machine', fromlist=['LIVE_BOOLEAN_GATES']).LIVE_BOOLEAN_GATES}
         live.update(public_owner_count=20,audio_owner_count=20,old_link_occurrences=0)
@@ -660,7 +678,7 @@ class AdapterTests(unittest.TestCase):
 
     def test_helper_mode_argv_match_closed_contracts(self):
         evidence = FakeEvidenceRunner({
-            "r2-object-metadata":{"content_type":"audio/mpeg","size":4,"sha256":"a"*64},
+            "r2-object-metadata":{"content_type":"audio/mpeg","size":4},
             "r2-public-access":{"dev_url_disabled":True,"custom_domains_disabled":True},
         })
         adapter = CloudflareProductionAdapter(self.config, self.repo, FakeRunner(outputs={0:b"ID3\0"}), evidence)
